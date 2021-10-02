@@ -1692,7 +1692,7 @@ void QtHostInterface::renderDisplay()
 {
   ImGui::NewFrame();
   DrawImGuiWindows();
-  m_display->Render();
+  //m_display->Render();
   ImGui::EndFrame();
 }
 

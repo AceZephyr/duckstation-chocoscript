@@ -1465,6 +1465,344 @@ void DoRunFrame()
   g_gpu->ResetGraphicsAPIState();
 }
 
+#define TEST_FRAMES_NO_INPUT 0
+#define TEST_FRAMES_ALL_INPUTS_FOR_PRIZE 1
+
+#define SCRIPT_MODE TEST_FRAMES_NO_INPUT
+
+#define INPUT_FILE_NAME "in.txt"
+#define OUTPUT_FILE_NAME "out.txt"
+#define ERR_FILE_NAME "err.txt"
+
+#define FRAME_DATA_BUFFER_SIZE 1 << 16
+
+#define STATE_WAITING_FOR_RACE_MODE 0
+#define STATE_WAITING_FOR_A_BIT_AFTER_RACE_MODE_ENTER 1
+#define STATE_SET_RNG 2
+#define STATE_HOLDING_START_FOR_PRE_RACE_SCREEN 3
+#define STATE_ADVANCING_TO_RACE 4
+#define STATE_RACING 5
+#define STATE_DONE 100
+
+struct ChocoData
+{
+  int speed;
+  int dash_speed;
+  int stamina;
+  int ai_type;
+  // int name_index;
+};
+
+struct FrameData
+{
+  int frame;
+  int prize_pool[3];
+  int tiles[15];
+  int my_ai_type;
+  struct ChocoData choco_data[5];
+};
+
+struct StateMachine
+{
+  struct FrameData frame_data[FRAME_DATA_BUFFER_SIZE];
+  int frame_data_length;
+  int state;
+  int current_frame_index;
+  int current_inputs;
+  int timer;
+};
+
+struct StateMachine state_machine;
+MemorySaveState choco_savestate;
+bool sm_is_init = false;
+FILE *in, *out, *err;
+
+void init_script()
+{
+  in = fopen(INPUT_FILE_NAME, "r");
+  out = fopen(OUTPUT_FILE_NAME, "w");
+  err = fopen(ERR_FILE_NAME, "w");
+  if (!in || !out || !err)
+  {
+    perror("init_script fopen");
+    exit(EXIT_FAILURE);
+  }
+  state_machine.frame_data_length = 0;
+  while (!feof(in))
+  {
+    struct FrameData* d = &state_machine.frame_data[state_machine.frame_data_length++];
+    int ret = fscanf(
+      in,
+      "%d|%d,%d,%d|%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d|%d,%d,%d,%d;%d,%d,%d,%d;%d,%d,%d,%d;%d,%d,%d,%d;%d,%d,%"
+      "d,%d|%d\n",
+      &d->frame, &d->prize_pool[0], &d->prize_pool[1], &d->prize_pool[2], &d->tiles[0], &d->tiles[1], &d->tiles[2],
+      &d->tiles[3], &d->tiles[4], &d->tiles[5], &d->tiles[6], &d->tiles[7], &d->tiles[8], &d->tiles[9], &d->tiles[10],
+      &d->tiles[11], &d->tiles[12], &d->tiles[13], &d->tiles[14], &d->choco_data[0].speed, &d->choco_data[0].dash_speed,
+      &d->choco_data[0].stamina, &d->choco_data[0].ai_type, &d->choco_data[1].speed, &d->choco_data[1].dash_speed,
+      &d->choco_data[1].stamina, &d->choco_data[1].ai_type, &d->choco_data[2].speed, &d->choco_data[2].dash_speed,
+      &d->choco_data[2].stamina, &d->choco_data[2].ai_type, &d->choco_data[3].speed, &d->choco_data[3].dash_speed,
+      &d->choco_data[3].stamina, &d->choco_data[3].ai_type, &d->choco_data[4].speed, &d->choco_data[4].dash_speed,
+      &d->choco_data[4].stamina, &d->choco_data[4].ai_type, &d->my_ai_type);
+    if (ret == EOF)
+    {
+      fprintf(err, "end of file at unexpected point\n");
+      exit(EXIT_FAILURE);
+    }
+    if (state_machine.frame_data_length >= FRAME_DATA_BUFFER_SIZE)
+    {
+      fprintf(err, "file too big\n");
+      exit(EXIT_FAILURE);
+    }
+  }
+
+  state_machine.state = STATE_WAITING_FOR_RACE_MODE;
+  state_machine.current_frame_index = 0;
+  state_machine.current_inputs = 0;
+  state_machine.timer = 0;
+  sm_is_init = true;
+  fclose(in);
+  fclose(out);
+  fclose(err);
+}
+
+void next_trial(bool won, int second_player)
+{
+  if (state_machine.current_inputs >= 16 || won)
+  {
+    out = fopen(OUTPUT_FILE_NAME, "a");
+    fprintf(out, "%d,%d,%d\n", state_machine.frame_data[state_machine.current_frame_index].frame,
+            state_machine.current_inputs, second_player);
+    fclose(out);
+  }
+  if (state_machine.current_inputs < 16 && !won)
+  {
+    state_machine.current_inputs++;
+    state_machine.state = STATE_SET_RNG;
+    LoadMemoryState(choco_savestate);
+  }
+  else if (state_machine.current_frame_index < state_machine.frame_data_length)
+  {
+    state_machine.current_inputs = 0;
+    state_machine.current_frame_index++;
+    state_machine.state = STATE_SET_RNG;
+    LoadMemoryState(choco_savestate);
+  }
+  else
+  {
+    state_machine.state = STATE_DONE;
+    fprintf(err, "done!\n");
+    fclose(out);
+    fclose(err);
+  }
+}
+
+void run_script()
+{
+  if (!sm_is_init)
+  {
+    init_script();
+  }
+  err = fopen(ERR_FILE_NAME, "a");
+  switch (state_machine.state)
+  {
+    case STATE_WAITING_FOR_RACE_MODE:
+      u8 game_module;
+      CPU::SafeReadMemoryByte(0x8009C560, &game_module);
+      if (game_module == 7)
+      {
+        state_machine.timer = 100;
+        state_machine.state = STATE_WAITING_FOR_A_BIT_AFTER_RACE_MODE_ENTER;
+        fprintf(err, "chocobo race mode start\n");
+      }
+      break;
+    case STATE_WAITING_FOR_A_BIT_AFTER_RACE_MODE_ENTER:
+      if (state_machine.timer == 0)
+      {
+        SaveMemoryState(&choco_savestate);
+        state_machine.state = STATE_SET_RNG;
+        fprintf(err, "savestate initialized\n");
+      }
+      else
+      {
+        state_machine.timer--;
+      }
+      break;
+    case STATE_SET_RNG:
+      CPU::SafeWriteMemoryWord(0x80009010, state_machine.frame_data[state_machine.current_frame_index].frame);
+      fprintf(err, "RNG: %d %x. Try %d.\n", state_machine.frame_data[state_machine.current_frame_index].frame,
+              state_machine.frame_data[state_machine.current_frame_index].frame, state_machine.current_inputs + 1);
+      state_machine.state = STATE_HOLDING_START_FOR_PRE_RACE_SCREEN;
+      state_machine.timer = 20;
+      break;
+    case STATE_HOLDING_START_FOR_PRE_RACE_SCREEN:
+      GetController(0)->SetButtonState(3, true);
+      u32 rng;
+      CPU::SafeReadMemoryWord(0x80009010, &rng);
+      if (rng != state_machine.frame_data[state_machine.current_frame_index].frame)
+      {
+        state_machine.timer--;
+        if (state_machine.timer == 0)
+        {
+          state_machine.state = STATE_ADVANCING_TO_RACE;
+          state_machine.timer = 6;
+        }
+      }
+      break;
+    case STATE_ADVANCING_TO_RACE:
+      if (state_machine.current_inputs > 0)
+      {
+        GetController(0)->SetButtonState(0, true);
+      }
+      state_machine.timer--;
+      if (state_machine.timer == 0)
+      {
+        fprintf(err, "Racers that need to win: ");
+        int idx = 0;
+        for (int i = 0; i < 5; i++)
+        {
+          for (int j = 0; j < 3; j++)
+          {
+            u8 byte;
+            CPU::SafeReadMemoryByte(0x800B7487 + 8 * idx, &byte);
+            if (byte != state_machine.frame_data[state_machine.current_frame_index].tiles[5 * j + i])
+            {
+              fprintf(err, "failed tile check\n");
+              exit(1);
+            }
+            if (j == 0 and byte == 2)
+            {
+              fprintf(err, "%d ", i + 2);
+            }
+            idx++;
+          }
+        }
+        fprintf(err, "\n");
+        state_machine.state = STATE_RACING;
+      }
+      break;
+    case STATE_RACING:
+      for (int i = 0; i < 16; i++)
+      {
+        GetController(0)->SetButtonState(i, false);
+      }
+      /*u32 rngstate;
+      CPU::SafeReadMemoryWord(0x80009010, &rngstate);
+      fprintf(err, "%x\n", rngstate);*/
+      u8 byte;
+      CPU::SafeReadMemoryByte(0x800B763C, &byte);
+      if (byte == 0)
+      {
+        switch (state_machine.current_inputs)
+        {
+          case 0:
+          case 1:
+            break;
+          case 2:
+            GetController(0)->SetButtonState(7, true);
+            break;
+          case 3:
+            GetController(0)->SetButtonState(5, true);
+            break;
+          case 4:
+            GetController(0)->SetButtonState(11, true);
+            GetController(0)->SetButtonState(9, true);
+            break;
+          case 5:
+            GetController(0)->SetButtonState(15, true);
+            break;
+          case 6:
+            GetController(0)->SetButtonState(15, true);
+            GetController(0)->SetButtonState(7, true);
+            break;
+          case 7:
+            GetController(0)->SetButtonState(15, true);
+            GetController(0)->SetButtonState(5, true);
+            break;
+          case 8:
+            GetController(0)->SetButtonState(13, true);
+            break;
+          case 9:
+            GetController(0)->SetButtonState(13, true);
+            GetController(0)->SetButtonState(7, true);
+            break;
+          case 10:
+            GetController(0)->SetButtonState(13, true);
+            GetController(0)->SetButtonState(5, true);
+            break;
+          case 11:
+            GetController(0)->SetButtonState(15, true);
+            GetController(0)->SetButtonState(11, true);
+            GetController(0)->SetButtonState(9, true);
+            break;
+          case 12:
+            GetController(0)->SetButtonState(15, true);
+            GetController(0)->SetButtonState(11, true);
+            GetController(0)->SetButtonState(9, true);
+            GetController(0)->SetButtonState(7, true);
+            break;
+          case 13:
+            GetController(0)->SetButtonState(15, true);
+            GetController(0)->SetButtonState(11, true);
+            GetController(0)->SetButtonState(9, true);
+            GetController(0)->SetButtonState(5, true);
+            break;
+          case 14:
+            GetController(0)->SetButtonState(13, true);
+            GetController(0)->SetButtonState(11, true);
+            GetController(0)->SetButtonState(9, true);
+            break;
+          case 15:
+            GetController(0)->SetButtonState(13, true);
+            GetController(0)->SetButtonState(11, true);
+            GetController(0)->SetButtonState(9, true);
+            GetController(0)->SetButtonState(7, true);
+            break;
+          case 16:
+            GetController(0)->SetButtonState(13, true);
+            GetController(0)->SetButtonState(11, true);
+            GetController(0)->SetButtonState(9, true);
+            GetController(0)->SetButtonState(5, true);
+            break;
+        }
+      }
+      else
+      {
+        if (byte != 1)
+        {
+          // we did not win
+          fprintf(err, "We did not win\n");
+          next_trial(SCRIPT_MODE == TEST_FRAMES_NO_INPUT, -1);
+        }
+        else
+        {
+          u32 addr = 0x800B76E0;
+          int racer = 0;
+          for (; addr <= 0x800B7970; addr += 0xA4, racer++)
+          {
+            CPU::SafeReadMemoryByte(addr, &byte);
+            if (byte == 2)
+            {
+              // this racer got 2nd place
+              fprintf(err, "2nd Place: %d\n", racer + 2);
+              // next_trial(state_machine.frame_data[state_machine.current_frame_index].tiles[racer] == 2, racer+2);
+              if (SCRIPT_MODE == TEST_FRAMES_NO_INPUT)
+              {
+                next_trial(true, racer + 2);
+              }
+              else
+              {
+                next_trial(state_machine.frame_data[state_machine.current_frame_index].tiles[racer] == 2, racer + 2);
+              }
+              break;
+            }
+          }
+        }
+      }
+      break;
+  }
+  fclose(err);
+}
+
 void RunFrame()
 {
   s_frame_timer.Reset();
@@ -1477,6 +1815,18 @@ void RunFrame()
 
   if (s_runahead_frames > 0)
     DoRunahead();
+
+  run_script();
+  /*if (GetController(1)->GetButtonState(0))
+  {
+    CPU::SafeWriteMemoryWord(0x80009010, 216049);
+  }*/
+
+  /*err = fopen(ERR_FILE_NAME, "a");
+  u32 rng;
+  CPU::SafeReadMemoryWord(0x80009010, &rng);
+  fprintf(err, "%x\n", rng);
+  fclose(err);*/
 
   DoRunFrame();
 
