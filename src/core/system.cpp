@@ -1591,8 +1591,6 @@ void next_trial(bool won, int second_player)
   {
     state_machine.state = STATE_DONE;
     fprintf(err, "done!\n");
-    fclose(out);
-    fclose(err);
   }
 }
 
@@ -1656,7 +1654,10 @@ void run_script()
       state_machine.timer--;
       if (state_machine.timer == 0)
       {
-        fprintf(err, "Racers that need to win: ");
+        if (SCRIPT_MODE == TEST_FRAMES_ALL_INPUTS_FOR_PRIZE)
+        {
+          fprintf(err, "Racers that need to win: ");
+        }
         int idx = 0;
         for (int i = 0; i < 5; i++)
         {
@@ -1667,27 +1668,29 @@ void run_script()
             if (byte != state_machine.frame_data[state_machine.current_frame_index].tiles[5 * j + i])
             {
               fprintf(err, "failed tile check\n");
+              // a somewhat crude way to stop the script but hey it works
               exit(1);
             }
-            if (j == 0 and byte == 2)
+            if (SCRIPT_MODE == TEST_FRAMES_ALL_INPUTS_FOR_PRIZE && j == 0 && byte == 2)
             {
               fprintf(err, "%d ", i + 2);
             }
             idx++;
           }
         }
-        fprintf(err, "\n");
+        if (SCRIPT_MODE == TEST_FRAMES_ALL_INPUTS_FOR_PRIZE)
+        {
+          fprintf(err, "\n");
+        }
         state_machine.state = STATE_RACING;
       }
       break;
     case STATE_RACING:
+      // clear controller 1's buttons
       for (int i = 0; i < 16; i++)
       {
         GetController(0)->SetButtonState(i, false);
       }
-      /*u32 rngstate;
-      CPU::SafeReadMemoryWord(0x80009010, &rngstate);
-      fprintf(err, "%x\n", rngstate);*/
       u8 byte;
       CPU::SafeReadMemoryByte(0x800B763C, &byte);
       if (byte == 0)
@@ -1767,33 +1770,75 @@ void run_script()
       }
       else
       {
-        if (byte != 1)
+        if (SCRIPT_MODE == TEST_FRAMES_NO_INPUT)
         {
-          // we did not win
-          fprintf(err, "We did not win\n");
-          next_trial(SCRIPT_MODE == TEST_FRAMES_NO_INPUT, -1);
+          u32 addr = 0x800B763C;
+          bool x = true;
+          for (; x && addr <= 0x800B7970; addr += 0xA4)
+          {
+            CPU::SafeReadMemoryByte(addr, &byte);
+            if (byte == 0)
+            {
+              x = false;
+            }
+          }
+          if (x)
+          {
+            out = fopen(OUTPUT_FILE_NAME, "a");
+            fprintf(out, "%d", state_machine.frame_data[state_machine.current_frame_index].frame);
+            fprintf(err, "Rankings: ");
+            for (int place = 1; place <= 6; place++)
+            {
+              int racer;
+              for (racer = 1, addr = 0x800B763C; addr <= 0x800B7970; addr += 0xA4, racer++)
+              {
+                CPU::SafeReadMemoryByte(addr, &byte);
+                if (byte == place)
+                {
+                  fprintf(out, ",%u", racer);
+                  fprintf(err, ",%u", racer);
+                }
+              }
+            }
+            fprintf(out, "\n");
+            fprintf(err, "\n");
+            fclose(out);
+            if (state_machine.current_frame_index < state_machine.frame_data_length)
+            {
+              state_machine.current_inputs = 0;
+              state_machine.current_frame_index++;
+              state_machine.state = STATE_SET_RNG;
+              LoadMemoryState(choco_savestate);
+            }
+            else
+            {
+              state_machine.state = STATE_DONE;
+              fprintf(err, "done!\n");
+            }
+          }
         }
         else
         {
-          u32 addr = 0x800B76E0;
-          int racer = 0;
-          for (; addr <= 0x800B7970; addr += 0xA4, racer++)
+          if (byte != 1)
           {
-            CPU::SafeReadMemoryByte(addr, &byte);
-            if (byte == 2)
+            // we did not win
+            fprintf(err, "We did not win\n");
+            next_trial(false, -1);
+          }
+          else
+          {
+            u32 addr = 0x800B76E0;
+            int racer = 0;
+            for (; addr <= 0x800B7970; addr += 0xA4, racer++)
             {
-              // this racer got 2nd place
-              fprintf(err, "2nd Place: %d\n", racer + 2);
-              // next_trial(state_machine.frame_data[state_machine.current_frame_index].tiles[racer] == 2, racer+2);
-              if (SCRIPT_MODE == TEST_FRAMES_NO_INPUT)
+              CPU::SafeReadMemoryByte(addr, &byte);
+              if (byte == 2)
               {
-                next_trial(true, racer + 2);
-              }
-              else
-              {
+                // this racer got 2nd place
+                fprintf(err, "2nd Place: %d\n", racer + 2);
                 next_trial(state_machine.frame_data[state_machine.current_frame_index].tiles[racer] == 2, racer + 2);
+                break;
               }
-              break;
             }
           }
         }
