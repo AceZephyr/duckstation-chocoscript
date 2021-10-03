@@ -485,7 +485,7 @@ void HostInterface::SetDefaultSettings(SettingsInterface& si)
   si.SetStringValue("Console", "Region", Settings::GetConsoleRegionName(Settings::DEFAULT_CONSOLE_REGION));
   si.SetBoolValue("Console", "Enable8MBRAM", false);
 
-  si.SetFloatValue("Main", "EmulationSpeed", 1.0f);
+  si.SetFloatValue("Main", "EmulationSpeed", 0.0f);
   si.SetFloatValue("Main", "FastForwardSpeed", 0.0f);
   si.SetFloatValue("Main", "TurboSpeed", 0.0f);
   si.SetBoolValue("Main", "SyncToHostRefreshRate", false);

@@ -1600,6 +1600,11 @@ void next_trial(bool won, int second_player)
 
 void run_script()
 {
+  // clear controller 1's buttons
+  for (int i = 0; i < 16; i++)
+  {
+    GetController(0)->SetButtonState(i, false);
+  }
   if (!sm_is_init)
   {
     init_script();
@@ -1690,11 +1695,6 @@ void run_script()
       }
       break;
     case STATE_RACING:
-      // clear controller 1's buttons
-      for (int i = 0; i < 16; i++)
-      {
-        GetController(0)->SetButtonState(i, false);
-      }
       u8 byte;
       CPU::SafeReadMemoryByte(0x800B763C, &byte);
       if (byte == 0)
