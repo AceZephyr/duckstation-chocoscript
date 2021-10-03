@@ -1554,11 +1554,14 @@ void init_script()
       exit(EXIT_FAILURE);
     }
   }
-
+  state_machine.frame_data_length--;
   state_machine.state = STATE_WAITING_FOR_RACE_MODE;
   state_machine.current_frame_index = 0;
   state_machine.current_inputs = 0;
   state_machine.timer = 0;
+
+  g_host_interface->LoadState("start_savestate.sav");
+
   sm_is_init = true;
   fclose(in);
   fclose(out);
@@ -1591,6 +1594,7 @@ void next_trial(bool won, int second_player)
   {
     state_machine.state = STATE_DONE;
     fprintf(err, "done!\n");
+    exit(0);
   }
 }
 
@@ -1814,6 +1818,7 @@ void run_script()
             {
               state_machine.state = STATE_DONE;
               fprintf(err, "done!\n");
+              exit(0);
             }
           }
         }

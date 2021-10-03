@@ -1,7 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Import Project="..\..\dep\msvc\vsprops\Configurations.props" />
-
   <ItemGroup>
     <ClCompile Include="aboutdialog.cpp" />
     <ClCompile Include="achievementsettingswidget.cpp" />
@@ -264,7 +263,6 @@
     </QtUi>
     <None Include="debuggerwindow.ui" />
   </ItemGroup>
-
   <ItemGroup>
     <CommonDataFiles Include="$(SolutionDir)data\**\*.*">
       <InProject>false</InProject>
@@ -274,23 +272,35 @@
     <Message Text="Copying common data files" Importance="High" />
     <Copy SourceFiles="@(CommonDataFiles)" DestinationFolder="$(BinaryOutputDir)\%(RecursiveDir)" SkipUnchangedFiles="true" />
   </Target>
-
   <PropertyGroup Label="Globals">
     <ProjectGuid>{28F14272-0EC4-41BB-849F-182ADB81AF70}</ProjectGuid>
   </PropertyGroup>
-
   <Import Project="..\..\dep\msvc\vsprops\Win32Application.props" />
   <Import Project="..\..\dep\msvc\vsprops\QtCompile.props" />
-
   <Import Project="..\frontend-common\frontend-common.props" />
-
   <ItemDefinitionGroup>
     <Link>
       <AdditionalDependencies>$(RootBuildDir)frontend-common\frontend-common.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
+    <ClCompile>
+      <DebugInformationFormat Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
+    <ClCompile>
+      <DebugInformationFormat Condition="'$(Configuration)|$(Platform)'=='DebugFast|x64'">ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
+    <ClCompile>
+      <DebugInformationFormat Condition="'$(Configuration)|$(Platform)'=='DebugUWP|x64'">ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
+    <ClCompile>
+      <DebugInformationFormat Condition="'$(Configuration)|$(Platform)'=='Release|x64'">ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
+    <ClCompile>
+      <DebugInformationFormat Condition="'$(Configuration)|$(Platform)'=='ReleaseLTCG|x64'">ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
+    <ClCompile>
+      <DebugInformationFormat Condition="'$(Configuration)|$(Platform)'=='ReleaseUWP|x64'">ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
   </ItemDefinitionGroup>
-
   <Import Project="..\..\dep\msvc\vsprops\Targets.props" />
-
   <Import Project="..\..\dep\msvc\vsprops\QtCompile.targets" />
 </Project>
