@@ -377,7 +377,7 @@ struct Settings
 #elif defined(_UWP)
   static constexpr AudioBackend DEFAULT_AUDIO_BACKEND = AudioBackend::XAudio2;
 #else
-  static constexpr AudioBackend DEFAULT_AUDIO_BACKEND = AudioBackend::Cubeb;
+  static constexpr AudioBackend DEFAULT_AUDIO_BACKEND = AudioBackend::Null;
 #endif
 
   static constexpr DisplayCropMode DEFAULT_DISPLAY_CROP_MODE = DisplayCropMode::Overscan;
