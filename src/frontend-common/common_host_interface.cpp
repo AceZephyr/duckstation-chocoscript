@@ -74,6 +74,7 @@ std::unique_ptr<AudioStream> CreateXAudio2AudioStream();
 Log_SetChannel(CommonHostInterface);
 
 static std::string s_settings_filename;
+
 static std::unique_ptr<FrontendCommon::InputOverlayUI> s_input_overlay_ui;
 
 CommonHostInterface::CommonHostInterface() = default;
@@ -310,13 +311,18 @@ static void PrintCommandLineHelp(const char* progname, const char* frontend_name
 }
 
 bool CommonHostInterface::ParseCommandLineParameters(int argc, char* argv[],
-                                                     std::unique_ptr<SystemBootParameters>* out_boot_params)
+                                                     std::unique_ptr<SystemBootParameters>* out_boot_params,
+                                                     struct ScriptFileNames* script_fns)
 {
   std::optional<bool> force_fast_boot;
   std::optional<bool> force_fullscreen;
   std::optional<s32> state_index;
   std::string state_filename;
   std::string boot_filename;
+  std::string script_in_filename;
+  std::string script_out_filename;
+  std::string script_err_filename;
+  std::string script_savestate_filename;
   bool no_more_args = false;
 
   for (int i = 1; i < argc; i++)
@@ -404,6 +410,26 @@ bool CommonHostInterface::ParseCommandLineParameters(int argc, char* argv[],
         s_settings_filename = argv[++i];
         continue;
       }
+      else if (CHECK_ARG_PARAM("-script_in"))
+      {
+        script_in_filename = argv[++i];
+        continue;
+      }
+      else if (CHECK_ARG_PARAM("-script_out"))
+      {
+        script_out_filename = argv[++i];
+        continue;
+      }
+      else if (CHECK_ARG_PARAM("-script_err"))
+      {
+        script_err_filename = argv[++i];
+        continue;
+      }
+      else if (CHECK_ARG_PARAM("-script_state"))
+      {
+        script_savestate_filename = argv[++i];
+        continue;
+      }
       else if (CHECK_ARG("--"))
       {
         no_more_args = true;
@@ -423,6 +449,11 @@ bool CommonHostInterface::ParseCommandLineParameters(int argc, char* argv[],
       boot_filename += ' ';
     boot_filename += argv[i];
   }
+
+  script_fns->script_in_filename = script_in_filename;
+  script_fns->script_out_filename = script_out_filename;
+  script_fns->script_err_filename = script_err_filename;
+  script_fns->script_savestate_filename = script_savestate_filename;
 
   if (state_index.has_value() || !boot_filename.empty() || !state_filename.empty())
   {

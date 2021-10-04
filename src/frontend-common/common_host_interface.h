@@ -309,6 +309,9 @@ public:
   /// Returns a pointer to the top-level window, needed by some controller interfaces.
   virtual void* GetTopLevelWindowHandle() const;
 
+  bool ParseCommandLineParameters(int argc, char* argv[], std::unique_ptr<SystemBootParameters>* out_boot_params,
+                                  struct ScriptFileNames* script_fns);
+
   /// Called when achievements data is loaded.
   virtual void OnAchievementsRefreshed();
 

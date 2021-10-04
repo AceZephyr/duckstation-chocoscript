@@ -10,7 +10,8 @@
 #include <memory>
 
 static bool ParseCommandLineParameters(QApplication& app, QtHostInterface* host_interface,
-                                       std::unique_ptr<SystemBootParameters>* boot_params)
+                                       std::unique_ptr<SystemBootParameters>* boot_params,
+                                       struct ScriptFileNames* script_fns)
 {
   const QStringList args(app.arguments());
   std::vector<std::string> converted_args;
@@ -24,7 +25,7 @@ static bool ParseCommandLineParameters(QApplication& app, QtHostInterface* host_
   for (std::string& arg : converted_args)
     converted_argv.push_back(arg.data());
 
-  return host_interface->ParseCommandLineParameters(args.size(), converted_argv.data(), boot_params);
+  return host_interface->ParseCommandLineParameters(args.size(), converted_argv.data(), boot_params, script_fns);
 }
 
 static void SignalHandler(int signal)
@@ -81,7 +82,8 @@ int main(int argc, char* argv[])
 
   std::unique_ptr<QtHostInterface> host_interface = std::make_unique<QtHostInterface>();
   std::unique_ptr<SystemBootParameters> boot_params;
-  if (!ParseCommandLineParameters(app, host_interface.get(), &boot_params))
+  struct ScriptFileNames state_names;
+  if (!ParseCommandLineParameters(app, host_interface.get(), &boot_params, &state_names))
     return EXIT_FAILURE;
 
   MainWindow* window = new MainWindow(host_interface.get());
@@ -93,6 +95,11 @@ int main(int argc, char* argv[])
                           QObject::tr("Failed to initialize host interface. Cannot continue."), QMessageBox::Ok);
     return EXIT_FAILURE;
   }
+
+  host_interface.get()->SetStringSettingValue("script", "in_fn", state_names.script_in_filename.c_str());
+  host_interface.get()->SetStringSettingValue("script", "out_fn", state_names.script_out_filename.c_str());
+  host_interface.get()->SetStringSettingValue("script", "err_fn", state_names.script_err_filename.c_str());
+  host_interface.get()->SetStringSettingValue("script", "ss_fn", state_names.script_savestate_filename.c_str());
 
   window->initializeAndShow();
   HookSignals();
@@ -144,7 +151,7 @@ extern "C" int APIENTRY WinMain(HINSTANCE, HINSTANCE, LPSTR /*cmdParamarg*/, int
   wchar_t** argvW = CommandLineToArgvW(GetCommandLineW(), &argc);
   if (argvW == nullptr)
     return -1;
-  char** argv = new char* [argc + 1];
+  char** argv = new char*[argc + 1];
   for (int i = 0; i != argc; ++i)
     argv[i] = wideToMulti(CP_ACP, argvW[i]);
   argv[argc] = nullptr;

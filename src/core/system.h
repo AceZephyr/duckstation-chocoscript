@@ -17,6 +17,14 @@ class Controller;
 struct CheatCode;
 class CheatList;
 
+struct ScriptFileNames
+{
+  std::string script_in_filename;
+  std::string script_out_filename;
+  std::string script_err_filename;
+  std::string script_savestate_filename;
+};
+
 struct SystemBootParameters
 {
   SystemBootParameters();
@@ -33,6 +41,7 @@ struct SystemBootParameters
   bool load_image_to_ram = false;
   bool force_software_renderer = false;
 };
+
 
 namespace System {
 

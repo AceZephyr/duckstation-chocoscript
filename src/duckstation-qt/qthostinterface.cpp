@@ -1690,10 +1690,10 @@ void QtHostInterface::threadEntryPoint()
 
 void QtHostInterface::renderDisplay()
 {
-  ImGui::NewFrame();
+  /*ImGui::NewFrame();
   DrawImGuiWindows();
-  //m_display->Render();
-  ImGui::EndFrame();
+  m_display->Render();
+  ImGui::EndFrame();*/
 }
 
 void QtHostInterface::wakeThread()

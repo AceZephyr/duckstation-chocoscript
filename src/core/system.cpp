@@ -700,8 +700,10 @@ bool ShouldCheckForImagePatches()
   return g_host_interface->GetBoolSettingValue("CDROM", "LoadImagePatches", false);
 }
 
+
 bool Boot(const SystemBootParameters& params)
 {
+
   Assert(s_state == State::Shutdown);
   s_state = State::Starting;
   s_startup_cancelled.store(false);
@@ -1470,11 +1472,7 @@ void DoRunFrame()
 
 #define SCRIPT_MODE TEST_FRAMES_NO_INPUT
 
-#define INPUT_FILE_NAME "in.txt"
-#define OUTPUT_FILE_NAME "out.txt"
-#define ERR_FILE_NAME "err.txt"
-
-#define FRAME_DATA_BUFFER_SIZE 1 << 16
+#define FRAME_DATA_BUFFER_SIZE 1 << 17
 
 #define STATE_WAITING_FOR_RACE_MODE 0
 #define STATE_WAITING_FOR_A_BIT_AFTER_RACE_MODE_ENTER 1
@@ -1516,12 +1514,21 @@ struct StateMachine state_machine;
 MemorySaveState choco_savestate;
 bool sm_is_init = false;
 FILE *in, *out, *err;
+std::string script_in_filename;
+std::string script_out_filename;
+std::string script_err_filename;
+std::string script_savestate_filename;
 
 void init_script()
 {
-  in = fopen(INPUT_FILE_NAME, "r");
-  out = fopen(OUTPUT_FILE_NAME, "w");
-  err = fopen(ERR_FILE_NAME, "w");
+  script_in_filename = g_host_interface->GetStringSettingValue("script", "in_fn", "in.txt");
+  script_out_filename = g_host_interface->GetStringSettingValue("script", "out_fn", "out.txt");
+  script_err_filename = g_host_interface->GetStringSettingValue("script", "err_fn", "err.txt");
+  script_savestate_filename = g_host_interface->GetStringSettingValue("script", "ss_fn", "start_savestate.sav");
+
+  in = fopen(script_in_filename.c_str(), "r");
+  out = fopen(script_out_filename.c_str(), "w");
+  err = fopen(script_err_filename.c_str(), "w");
   if (!in || !out || !err)
   {
     perror("init_script fopen");
@@ -1560,7 +1567,11 @@ void init_script()
   state_machine.current_inputs = 0;
   state_machine.timer = 0;
 
-  g_host_interface->LoadState("start_savestate.sav");
+  if (!g_host_interface->LoadState(script_savestate_filename.c_str()))
+  {
+    fprintf(err, "Failed to load starting savestate\n");
+    exit(1);
+  }
 
   sm_is_init = true;
   fclose(in);
@@ -1572,7 +1583,7 @@ void next_trial(bool won, int second_player)
 {
   if (state_machine.current_inputs >= 16 || won)
   {
-    out = fopen(OUTPUT_FILE_NAME, "a");
+    out = fopen(script_out_filename.c_str(), "a");
     fprintf(out, "%d,%d,%d\n", state_machine.frame_data[state_machine.current_frame_index].frame,
             state_machine.current_inputs, second_player);
     fclose(out);
@@ -1609,7 +1620,7 @@ void run_script()
   {
     init_script();
   }
-  err = fopen(ERR_FILE_NAME, "a");
+  err = fopen(script_err_filename.c_str(), "a");
   switch (state_machine.state)
   {
     case STATE_WAITING_FOR_RACE_MODE:
@@ -1788,7 +1799,7 @@ void run_script()
           }
           if (x)
           {
-            out = fopen(OUTPUT_FILE_NAME, "a");
+            out = fopen(script_out_filename.c_str(), "a");
             fprintf(out, "%d", state_machine.frame_data[state_machine.current_frame_index].frame);
             fprintf(err, "Rankings: ");
             for (int place = 1; place <= 6; place++)
@@ -1872,7 +1883,7 @@ void RunFrame()
     CPU::SafeWriteMemoryWord(0x80009010, 216049);
   }*/
 
-  /*err = fopen(ERR_FILE_NAME, "a");
+  /*err = fopen(script_err_filename, "a");
   u32 rng;
   CPU::SafeReadMemoryWord(0x80009010, &rng);
   fprintf(err, "%x\n", rng);
