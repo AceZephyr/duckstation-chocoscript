@@ -1522,7 +1522,7 @@ void DoRunFrame()
   }
 
   // Generate any pending samples from the SPU before sleeping, this way we reduce the chances of underruns.
-  g_spu.GeneratePendingSamples();
+  g_spu.Generate4PendingSamples();
 
   if (s_cheat_list)
     s_cheat_list->Apply();
@@ -1565,8 +1565,10 @@ struct FrameData
 
 struct StateMachine
 {
-  struct FrameData frame_data[FRAME_DATA_BUFFER_SIZE];
-  int frame_data_length;
+  //struct FrameData frame_data[FRAME_DATA_BUFFER_SIZE];
+  struct FrameData current_frame_data;
+  long int chars_read_total;
+  //int frame_data_length;
   int state;
   int current_frame_index;
   int current_inputs;
@@ -1581,6 +1583,31 @@ std::string script_in_filename;
 std::string script_out_filename;
 std::string script_err_filename;
 std::string script_savestate_filename;
+
+void read_next_frame() {
+  int ret;
+  struct FrameData* d = &state_machine.current_frame_data;
+  int chars_read_this_line = 0;
+  in = fopen(script_in_filename.c_str(), "r");
+  ret = fseek(in, state_machine.chars_read_total, SEEK_SET);
+  ret = fscanf(
+    in,
+    "%d|%d,%d,%d|%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d|%d,%d,%d,%d;%d,%d,%d,%d;%d,%d,%d,%d;%d,%d,%d,%d;%d,%d,%"
+    "d,%d|%d\n%n",
+    &d->frame, &d->prize_pool[0], &d->prize_pool[1], &d->prize_pool[2], &d->tiles[0], &d->tiles[1], &d->tiles[2],
+    &d->tiles[3], &d->tiles[4], &d->tiles[5], &d->tiles[6], &d->tiles[7], &d->tiles[8], &d->tiles[9], &d->tiles[10],
+    &d->tiles[11], &d->tiles[12], &d->tiles[13], &d->tiles[14], &d->choco_data[0].speed, &d->choco_data[0].dash_speed,
+    &d->choco_data[0].stamina, &d->choco_data[0].ai_type, &d->choco_data[1].speed, &d->choco_data[1].dash_speed,
+    &d->choco_data[1].stamina, &d->choco_data[1].ai_type, &d->choco_data[2].speed, &d->choco_data[2].dash_speed,
+    &d->choco_data[2].stamina, &d->choco_data[2].ai_type, &d->choco_data[3].speed, &d->choco_data[3].dash_speed,
+    &d->choco_data[3].stamina, &d->choco_data[3].ai_type, &d->choco_data[4].speed, &d->choco_data[4].dash_speed,
+    &d->choco_data[4].stamina, &d->choco_data[4].ai_type, &d->my_ai_type, &chars_read_this_line);
+  if (ret == EOF)
+  {
+    fprintf(err, "end of file at unexpected point\n");
+    exit(EXIT_FAILURE);
+  }
+}
 
 void init_script()
 {
@@ -1597,6 +1624,7 @@ void init_script()
     perror("init_script fopen");
     exit(EXIT_FAILURE);
   }
+  state_machine.chars_read_total = 0;
   state_machine.frame_data_length = 0;
   while (!feof(in))
   {
@@ -1659,6 +1687,7 @@ void next_trial(bool won, int second_player)
   }
   else if (state_machine.current_frame_index < state_machine.frame_data_length)
   {
+      // next frame
     state_machine.current_inputs = 0;
     state_machine.current_frame_index++;
     state_machine.state = STATE_SET_RNG;
