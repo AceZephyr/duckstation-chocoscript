@@ -45,6 +45,10 @@
 #include <thread>
 Log_SetChannel(System);
 
+#ifdef WITH_CHEEVOS
+#include "cheevos.h"
+#endif
+
 // #define PROFILE_MEMORY_SAVE_STATES 1
 
 SystemBootParameters::SystemBootParameters() = default;
@@ -67,15 +71,16 @@ static bool SaveMemoryState(MemorySaveState* mss);
 static bool LoadMemoryState(const MemorySaveState& mss);
 
 static bool LoadEXE(const char* filename);
-static bool SetExpansionROM(const char* filename);
 
 /// Opens CD image, preloading if needed.
 static std::unique_ptr<CDImage> OpenCDImage(const char* path, Common::Error* error, bool force_preload,
                                             bool check_for_patches);
+static bool ReadExecutableFromImage(ISOReader& iso, std::string* out_executable_name,
+                                    std::vector<u8>* out_executable_data);
 static bool ShouldCheckForImagePatches();
 
 static bool DoLoadState(ByteStream* stream, bool force_software_renderer, bool update_display);
-static bool DoState(StateWrapper& sw, HostDisplayTexture** host_texture, bool update_display);
+static bool DoState(StateWrapper& sw, HostDisplayTexture** host_texture, bool update_display, bool is_memory_state);
 static void DoRunFrame();
 static bool CreateGPU(GPURenderer renderer);
 
@@ -369,15 +374,23 @@ std::string GetGameCodeForImage(CDImage* cdi, bool fallback_to_hash)
 
 std::string GetGameHashCodeForImage(CDImage* cdi)
 {
+  ISOReader iso;
+  if (!iso.Open(cdi, 1))
+    return {};
+
   std::string exe_name;
   std::vector<u8> exe_buffer;
   if (!ReadExecutableFromImage(cdi, &exe_name, &exe_buffer))
     return {};
 
+  const u32 track_1_length = cdi->GetTrackLength(1);
+
   XXH64_state_t* state = XXH64_createState();
   XXH64_reset(state, 0x4242D00C);
   XXH64_update(state, exe_name.c_str(), exe_name.size());
   XXH64_update(state, exe_buffer.data(), exe_buffer.size());
+  XXH64_update(state, &iso.GetPVD(), sizeof(ISOReader::ISOPrimaryVolumeDescriptor));
+  XXH64_update(state, &track_1_length, sizeof(track_1_length));
   const u64 hash = XXH64_digest(state);
   XXH64_freeState(state);
 
@@ -385,7 +398,7 @@ std::string GetGameHashCodeForImage(CDImage* cdi)
   return StringUtil::StdStringFromFormat("HASH-%" PRIX64, hash);
 }
 
-static std::string GetExecutableNameForImage(CDImage* cdi, ISOReader& iso, bool strip_subdirectories)
+static std::string GetExecutableNameForImage(ISOReader& iso, bool strip_subdirectories)
 {
   // Read SYSTEM.CNF
   std::vector<u8> system_cnf_data;
@@ -478,18 +491,14 @@ std::string GetExecutableNameForImage(CDImage* cdi)
   if (!iso.Open(cdi, 1))
     return {};
 
-  return GetExecutableNameForImage(cdi, iso, true);
+  return GetExecutableNameForImage(iso, true);
 }
 
-bool ReadExecutableFromImage(CDImage* cdi, std::string* out_executable_name, std::vector<u8>* out_executable_data)
+bool ReadExecutableFromImage(ISOReader& iso, std::string* out_executable_name, std::vector<u8>* out_executable_data)
 {
-  ISOReader iso;
-  if (!iso.Open(cdi, 1))
-    return false;
-
   bool result = false;
 
-  std::string executable_path(GetExecutableNameForImage(cdi, iso, false));
+  std::string executable_path(GetExecutableNameForImage(iso, false));
   Log_DevPrintf("Executable path: '%s'", executable_path.c_str());
   if (!executable_path.empty())
   {
@@ -514,6 +523,15 @@ bool ReadExecutableFromImage(CDImage* cdi, std::string* out_executable_name, std
     *out_executable_name = std::move(executable_path);
 
   return true;
+}
+
+bool ReadExecutableFromImage(CDImage* cdi, std::string* out_executable_name, std::vector<u8>* out_executable_data)
+{
+  ISOReader iso;
+  if (!iso.Open(cdi, 1))
+    return false;
+
+  return ReadExecutableFromImage(iso, out_executable_name, out_executable_data);
 }
 
 DiscRegion GetRegionForCode(std::string_view code)
@@ -655,7 +673,7 @@ std::unique_ptr<CDImage> OpenCDImage(const char* path, Common::Error* error, boo
 
   if (force_preload || g_settings.cdrom_load_image_to_ram)
   {
-    if (media->HasSubImages())
+    if (media->HasSubImages() && media->GetSubImageCount() > 1)
     {
       g_host_interface->AddFormattedOSDMessage(
         15.0f,
@@ -665,11 +683,22 @@ std::unique_ptr<CDImage> OpenCDImage(const char* path, Common::Error* error, boo
     else
     {
       HostInterfaceProgressCallback callback;
-      std::unique_ptr<CDImage> memory_image = CDImage::CreateMemoryImage(media.get(), &callback);
-      if (memory_image)
-        media = std::move(memory_image);
-      else
-        Log_WarningPrintf("Failed to preload image '%s' to RAM", path);
+      const CDImage::PrecacheResult res = media->Precache(&callback);
+      if (res == CDImage::PrecacheResult::Unsupported)
+      {
+        // fall back to copy precaching
+        std::unique_ptr<CDImage> memory_image = CDImage::CreateMemoryImage(media.get(), &callback);
+        if (memory_image)
+          media = std::move(memory_image);
+        else
+          Log_WarningPrintf("Failed to preload image '%s' to RAM", path);
+      }
+      else if (res != CDImage::PrecacheResult::Success)
+      {
+        g_host_interface->AddOSDMessage(
+          g_host_interface->TranslateStdString("OSDMessage", "Precaching CD image failed, it may be unreliable."),
+          15.0f);
+      }
     }
   }
 
@@ -1045,10 +1074,8 @@ bool CreateGPU(GPURenderer renderer)
   return true;
 }
 
-bool DoState(StateWrapper& sw, HostDisplayTexture** host_texture, bool update_display)
+bool DoState(StateWrapper& sw, HostDisplayTexture** host_texture, bool update_display, bool is_memory_state)
 {
-  const bool is_memory_state = (host_texture != nullptr);
-
   if (!sw.DoMarker("System"))
     return false;
 
@@ -1060,7 +1087,12 @@ bool DoState(StateWrapper& sw, HostDisplayTexture** host_texture, bool update_di
     return false;
 
   if (sw.IsReading())
-    CPU::CodeCache::Flush();
+  {
+    if (is_memory_state)
+      CPU::CodeCache::InvalidateAll();
+    else
+      CPU::CodeCache::Flush();
+  }
 
   // only reset pgxp if we're not runahead-rollbacking. the value checks will save us from broken rendering, and it
   // saves using imprecise values for a frame in 30fps games.
@@ -1128,6 +1160,33 @@ bool DoState(StateWrapper& sw, HostDisplayTexture** host_texture, bool update_di
     UpdateOverclock();
   }
 
+  if (!is_memory_state)
+  {
+    if (sw.GetVersion() >= 56)
+    {
+      if (!sw.DoMarker("Cheevos"))
+        return false;
+
+#ifdef WITH_CHEEVOS
+      if (!Cheevos::DoState(sw))
+        return false;
+#else
+      // if we compiled without cheevos, we need to toss out the data from states which were
+      u32 data_size = 0;
+      sw.Do(&data_size);
+      if (data_size > 0)
+        sw.SkipBytes(data_size);
+#endif
+    }
+    else
+    {
+#ifdef WITH_CHEEVOS
+      // loading an old state without cheevos, so reset the runtime
+      Cheevos::Reset();
+#endif
+    }
+  }
+
   return !sw.HasError();
 }
 
@@ -1157,6 +1216,10 @@ void Reset()
   s_internal_frame_number = 0;
   TimingEvents::Reset();
   ResetPerformanceCounters();
+
+#ifdef WITH_CHEEVOS
+  Cheevos::Reset();
+#endif
 
   g_gpu->ResetGraphicsAPIState();
 }
@@ -1298,7 +1361,7 @@ bool DoLoadState(ByteStream* state, bool force_software_renderer, bool update_di
     return false;
 
   StateWrapper sw(state, StateWrapper::Mode::Read, header.version);
-  if (!DoState(sw, nullptr, update_display))
+  if (!DoState(sw, nullptr, update_display, false))
     return false;
 
   if (s_state == State::Starting)
@@ -1387,7 +1450,7 @@ bool SaveState(ByteStream* state, u32 screenshot_size /* = 256 */)
     g_gpu->RestoreGraphicsAPIState();
 
     StateWrapper sw(state, StateWrapper::Mode::Write, SAVE_STATE_VERSION);
-    const bool result = DoState(sw, nullptr, false);
+    const bool result = DoState(sw, nullptr, false, false);
 
     g_gpu->ResetGraphicsAPIState();
 
@@ -2070,16 +2133,17 @@ static bool LoadEXEToRAM(const char* filename, bool patch_bios)
     }
   }
 
-  if (header.file_size >= 4)
+  const u32 file_data_size = std::min<u32>(file_size - sizeof(BIOS::PSEXEHeader), header.file_size);
+  if (file_data_size >= 4)
   {
-    std::vector<u32> data_words((header.file_size + 3) / 4);
-    if (std::fread(data_words.data(), header.file_size, 1, fp) != 1)
+    std::vector<u32> data_words((file_data_size + 3) / 4);
+    if (std::fread(data_words.data(), file_data_size, 1, fp) != 1)
     {
       std::fclose(fp);
       return false;
     }
 
-    const u32 num_words = header.file_size / 4;
+    const u32 num_words = file_data_size / 4;
     u32 address = header.load_address;
     for (u32 i = 0; i < num_words; i++)
     {
@@ -2122,7 +2186,8 @@ bool InjectEXEFromBuffer(const void* buffer, u32 buffer_size, bool patch_bios)
   std::memcpy(&header, buffer_ptr, sizeof(header));
   buffer_ptr += sizeof(header);
 
-  if (!BIOS::IsValidPSExeHeader(header, static_cast<u32>(buffer_end - buffer_ptr)))
+  const u32 file_size = static_cast<u32>(static_cast<u32>(buffer_end - buffer_ptr));
+  if (!BIOS::IsValidPSExeHeader(header, file_size))
     return false;
 
   if (header.memfill_size > 0)
@@ -2136,15 +2201,16 @@ bool InjectEXEFromBuffer(const void* buffer, u32 buffer_size, bool patch_bios)
     }
   }
 
-  if (header.file_size >= 4)
+  const u32 file_data_size = std::min<u32>(file_size - sizeof(BIOS::PSEXEHeader), header.file_size);
+  if (file_data_size >= 4)
   {
-    std::vector<u32> data_words((header.file_size + 3) / 4);
-    if ((buffer_end - buffer_ptr) < header.file_size)
+    std::vector<u32> data_words((file_data_size + 3) / 4);
+    if ((buffer_end - buffer_ptr) < file_data_size)
       return false;
 
-    std::memcpy(data_words.data(), buffer_ptr, header.file_size);
+    std::memcpy(data_words.data(), buffer_ptr, file_data_size);
 
-    const u32 num_words = header.file_size / 4;
+    const u32 num_words = file_data_size / 4;
     u32 address = header.load_address;
     for (u32 i = 0; i < num_words; i++)
     {
@@ -2166,6 +2232,9 @@ bool InjectEXEFromBuffer(const void* buffer, u32 buffer_size, bool patch_bios)
 
   return true;
 }
+
+#if 0
+// currently not used until EXP1 is implemented
 
 bool SetExpansionROM(const char* filename)
 {
@@ -2194,14 +2263,11 @@ bool SetExpansionROM(const char* filename)
   Bus::SetExpansionROM(std::move(data));
   return true;
 }
+#endif
 
 void StallCPU(TickCount ticks)
 {
   CPU::AddPendingTicks(ticks);
-#if 0
-  if (CPU::GetPendingTicks() >= CPU::GetDowncount() && !m_running_events)
-    RunEvents();
-#endif
 }
 
 Controller* GetController(u32 slot)
@@ -2702,7 +2768,7 @@ bool LoadMemoryState(const MemorySaveState& mss)
 
   StateWrapper sw(mss.state_stream.get(), StateWrapper::Mode::Read, SAVE_STATE_VERSION);
   HostDisplayTexture* host_texture = mss.vram_texture.get();
-  if (!DoState(sw, &host_texture, true))
+  if (!DoState(sw, &host_texture, true, true))
   {
     g_host_interface->ReportError("Failed to load memory save state, resetting.");
     Reset();
@@ -2721,7 +2787,7 @@ bool SaveMemoryState(MemorySaveState* mss)
 
   HostDisplayTexture* host_texture = mss->vram_texture.release();
   StateWrapper sw(mss->state_stream.get(), StateWrapper::Mode::Write, SAVE_STATE_VERSION);
-  if (!DoState(sw, &host_texture, false))
+  if (!DoState(sw, &host_texture, false, true))
   {
     Log_ErrorPrint("Failed to create rewind state.");
     delete host_texture;
@@ -2881,7 +2947,9 @@ void DoRunahead()
   if (frames_to_run > 0)
   {
     Common::Timer timer2;
+#ifdef PROFILE_MEMORY_SAVE_STATES
     const s32 temp = frames_to_run;
+#endif
 
     g_spu.SetAudioStream(s_runahead_audio_stream.get());
 

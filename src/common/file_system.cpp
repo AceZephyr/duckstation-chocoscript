@@ -451,7 +451,7 @@ void CanonicalizePath(char* Destination, u32 cbDestination, const char* Path, bo
   {
     char prevCh = (i > 0) ? Path[i - 1] : '\0';
     char currentCh = Path[i];
-    char nextCh = (i < pathLength) ? Path[i + 1] : '\0';
+    char nextCh = (i < (pathLength - 1)) ? Path[i + 1] : '\0';
 
     if (currentCh == '.')
     {
@@ -557,8 +557,8 @@ void CanonicalizePath(std::string& path, bool OSPath /*= true*/)
 
 static inline bool FileSystemCharacterIsSane(char c, bool StripSlashes)
 {
-  if (!(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') && !(c >= '0' && c <= '9') && c != ' ' && c != ' ' &&
-      c != '_' && c != '-' && c != '.')
+  if (!(c >= 'a' && c <= 'z') && !(c >= 'A' && c <= 'Z') && !(c >= '0' && c <= '9') && c != ' ' && c != '_' &&
+      c != '-' && c != '.')
   {
     if (!StripSlashes && (c == '/' || c == '\\'))
       return true;
@@ -2480,10 +2480,16 @@ std::string GetWorkingDirectory()
   while (!getcwd(buffer.data(), buffer.size()))
   {
     if (errno != ERANGE)
-      return {};
+    {
+      buffer.clear();
+      break;
+    }
 
     buffer.resize(buffer.size() * 2);
   }
+
+  if (!buffer.empty())
+    buffer.resize(std::strlen(buffer.c_str()));
 
   return buffer;
 }

@@ -41,6 +41,7 @@ public:
 
   /// Access to host display.
   ALWAYS_INLINE HostDisplay* GetDisplay() const { return m_display.get(); }
+  ALWAYS_INLINE bool HasDisplay() const { return static_cast<bool>(m_display.get()); }
 
   /// Access to host audio stream.
   ALWAYS_INLINE AudioStream* GetAudioStream() const { return m_audio_stream.get(); }
@@ -70,8 +71,11 @@ public:
   bool ConfirmFormattedMessage(const char* format, ...) printflike(2, 3);
 
   /// Adds OSD messages, duration is in seconds.
-  virtual void AddOSDMessage(std::string message, float duration = 2.0f);
+  virtual void AddOSDMessage(std::string message, float duration = 2.0f) = 0;
+  virtual void AddKeyedOSDMessage(std::string key, std::string message, float duration = 2.0f) = 0;
+  virtual void RemoveKeyedOSDMessage(std::string key) = 0;
   void AddFormattedOSDMessage(float duration, const char* format, ...) printflike(3, 4);
+  void AddKeyedFormattedOSDMessage(std::string key, float duration, const char* format, ...) printflike(4, 5);
 
   /// Returns the base user directory path.
   ALWAYS_INLINE const std::string& GetUserDirectory() const { return m_user_directory; }
@@ -88,10 +92,10 @@ public:
   /// Displays a loading screen with the logo, rendered with ImGui. Use when executing possibly-time-consuming tasks
   /// such as compiling shaders when starting up.
   virtual void DisplayLoadingScreen(const char* message, int progress_min = -1, int progress_max = -1,
-                                    int progress_value = -1);
+                                    int progress_value = -1)  = 0;
 
   /// Retrieves information about specified game from game list.
-  virtual void GetGameInfo(const char* path, CDImage* image, std::string* code, std::string* title);
+  virtual void GetGameInfo(const char* path, CDImage* image, std::string* code, std::string* title) = 0;
 
   /// Returns the directory where per-game memory cards will be saved.
   virtual std::string GetMemoryCardDirectory() const;
@@ -120,6 +124,10 @@ public:
   /// Returns a string list from the configuration.
   virtual std::vector<std::string> GetSettingStringList(const char* section, const char* key) = 0;
 
+  /// Returns the settings interface.
+  virtual SettingsInterface* GetSettingsInterface() = 0;
+  virtual std::lock_guard<std::recursive_mutex> GetSettingsLock() = 0;
+
   /// Translates a string to the current language.
   virtual TinyString TranslateString(const char* context, const char* str, const char* disambiguation = nullptr,
                                      int n = -1) const;
@@ -147,11 +155,14 @@ public:
   virtual std::unique_ptr<ByteStream> OpenPackageFile(const char* path, u32 flags) = 0;
 
   virtual void OnRunningGameChanged(const std::string& path, CDImage* image, const std::string& game_code,
-                                    const std::string& game_title);
-  virtual void OnSystemPerformanceCountersUpdated();
+                                    const std::string& game_title) = 0;
+  virtual void OnSystemPerformanceCountersUpdated() = 0;
 
   /// Called when the display is invalidated (e.g. a state is loaded).
-  virtual void OnDisplayInvalidated();
+  virtual void OnDisplayInvalidated() = 0;
+
+  /// Called when achievements data is loaded.
+  virtual void OnAchievementsRefreshed() = 0;
 
 protected:
   virtual bool AcquireHostDisplay() = 0;
@@ -159,11 +170,10 @@ protected:
   virtual std::unique_ptr<AudioStream> CreateAudioStream(AudioBackend backend) = 0;
   virtual s32 GetAudioOutputVolume() const;
 
-  virtual void OnSystemCreated();
-  virtual void OnSystemPaused(bool paused);
-  virtual void OnSystemDestroyed();
-  virtual void OnSystemStateSaved(bool global, s32 slot);
-  virtual void OnControllerTypeChanged(u32 slot);
+  virtual void OnSystemCreated() = 0;
+  virtual void OnSystemPaused(bool paused) = 0;
+  virtual void OnSystemDestroyed() = 0;
+  virtual void OnControllerTypeChanged(u32 slot) = 0;
 
   /// Restores all settings to defaults.
   virtual void SetDefaultSettings(SettingsInterface& si);
@@ -184,7 +194,7 @@ protected:
   virtual void RecreateSystem();
 
   /// Enables "relative" mouse mode, locking the cursor position and returning relative coordinates.
-  virtual void SetMouseMode(bool relative, bool hide_cursor);
+  virtual void SetMouseMode(bool relative, bool hide_cursor) = 0;
 
   /// Call when host display size changes, use with "match display" aspect ratio setting.
   virtual void OnHostDisplayResized();

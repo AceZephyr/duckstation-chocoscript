@@ -8,12 +8,12 @@
 #include "core/cheats.h"
 #include "core/controller.h"
 #include "core/gpu.h"
+#include "core/imgui_fullscreen.h"
+#include "core/imgui_styles.h"
 #include "core/memory_card.h"
 #include "core/system.h"
 #include "frontend-common/fullscreen_ui.h"
 #include "frontend-common/game_list.h"
-#include "frontend-common/imgui_fullscreen.h"
-#include "frontend-common/imgui_styles.h"
 #include "frontend-common/ini_settings_interface.h"
 #include "frontend-common/opengl_host_display.h"
 #include "frontend-common/sdl_audio_stream.h"
@@ -48,7 +48,7 @@ Log_SetChannel(QtHostInterface);
 #endif
 
 #ifdef WITH_CHEEVOS
-#include "frontend-common/cheevos.h"
+#include "core/cheevos.h"
 #endif
 
 QtHostInterface::QtHostInterface(QObject* parent) : QObject(parent), CommonHostInterface()
@@ -72,7 +72,8 @@ std::vector<std::pair<QString, QString>> QtHostInterface::getAvailableLanguageLi
 {
   return {{QStringLiteral("English"), QStringLiteral("en")},
           {QStringLiteral("Deutsch"), QStringLiteral("de")},
-          {QStringLiteral("Español"), QStringLiteral("es")},
+          {QStringLiteral("Español de Hispanoamérica"), QStringLiteral("es")},
+          {QStringLiteral("Español de España"), QStringLiteral("es-es")},
           {QStringLiteral("Français"), QStringLiteral("fr")},
           {QStringLiteral("עברית"), QStringLiteral("he")},
           {QStringLiteral("日本語"), QStringLiteral("ja")},
@@ -784,8 +785,6 @@ void QtHostInterface::OnSystemDestroyed()
 
 void QtHostInterface::OnSystemPerformanceCountersUpdated()
 {
-  HostInterface::OnSystemPerformanceCountersUpdated();
-
   GPURenderer renderer = GPURenderer::Count;
   u32 render_width = 0;
   u32 render_height = 0;
@@ -1061,7 +1060,7 @@ void QtHostInterface::populateSaveStateMenu(const char* game_code, QMenu* menu)
     if (path.isEmpty())
       return;
 
-    SaveState(path.toUtf8().constData());
+    saveState(path);
   });
   menu->addSeparator();
 

@@ -77,6 +77,13 @@ void RegTestHostInterface::AddOSDMessage(std::string message, float duration /*=
   Log_InfoPrintf("OSD: %s", message.c_str());
 }
 
+void RegTestHostInterface::AddKeyedOSDMessage(std::string key, std::string message, float duration /* = 2.0f */)
+{
+  Log_InfoPrintf("OSD: %s", message.c_str());
+}
+
+void RegTestHostInterface::RemoveKeyedOSDMessage(std::string key) {}
+
 void RegTestHostInterface::DisplayLoadingScreen(const char* message, int progress_min /*= -1*/,
                                                 int progress_max /*= -1*/, int progress_value /*= -1*/)
 {
@@ -104,8 +111,6 @@ void RegTestHostInterface::GetGameInfo(const char* path, CDImage* image, std::st
 void RegTestHostInterface::OnRunningGameChanged(const std::string& path, CDImage* image, const std::string& game_code,
                                                 const std::string& game_title)
 {
-  HostInterface::OnRunningGameChanged(path, image, game_code, game_title);
-
   Log_InfoPrintf("Game Path: %s", path.c_str());
   Log_InfoPrintf("Game Code: %s", game_code.c_str());
   Log_InfoPrintf("Game Title: %s", game_title.c_str());
@@ -127,6 +132,12 @@ void RegTestHostInterface::OnRunningGameChanged(const std::string& path, CDImage
 
   UpdateSettings();
 }
+
+void RegTestHostInterface::OnSystemPerformanceCountersUpdated() {}
+
+void RegTestHostInterface::OnDisplayInvalidated() {}
+
+void RegTestHostInterface::OnAchievementsRefreshed() {}
 
 std::string RegTestHostInterface::GetStringSettingValue(const char* section, const char* key,
                                                         const char* default_value /*= ""*/)
@@ -152,6 +163,16 @@ float RegTestHostInterface::GetFloatSettingValue(const char* section, const char
 std::vector<std::string> RegTestHostInterface::GetSettingStringList(const char* section, const char* key)
 {
   return m_settings_interface.GetStringList(section, key);
+}
+
+SettingsInterface* RegTestHostInterface::GetSettingsInterface()
+{
+  return &m_settings_interface;
+}
+
+std::lock_guard<std::recursive_mutex> RegTestHostInterface::GetSettingsLock()
+{
+  return std::lock_guard<std::recursive_mutex>(m_settings_mutex);
 }
 
 void RegTestHostInterface::UpdateSettings()
@@ -283,6 +304,16 @@ std::unique_ptr<AudioStream> RegTestHostInterface::CreateAudioStream(AudioBacken
 {
   return AudioStream::CreateNullAudioStream();
 }
+
+void RegTestHostInterface::OnSystemCreated() {}
+
+void RegTestHostInterface::OnSystemPaused(bool paused) {}
+
+void RegTestHostInterface::OnSystemDestroyed() {}
+
+void RegTestHostInterface::OnControllerTypeChanged(u32 slot) {}
+
+void RegTestHostInterface::SetMouseMode(bool relative, bool hide_cursor) {}
 
 static void PrintCommandLineVersion()
 {

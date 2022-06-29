@@ -21,6 +21,9 @@ const char* rc_console_name(int console_id)
     case RC_CONSOLE_ARCADE:
       return "Arcade";
 
+    case RC_CONSOLE_ARDUBOY:
+      return "Arduboy";
+
     case RC_CONSOLE_ATARI_2600:
       return "Atari 2600";
 
@@ -96,6 +99,9 @@ const char* rc_console_name(int console_id)
     case RC_CONSOLE_MEGA_DRIVE:
       return "Sega Genesis";
 
+    case RC_CONSOLE_MEGADUCK:
+      return "Mega Duck";
+
     case RC_CONSOLE_MS_DOS:
       return "MS-DOS";
 
@@ -126,6 +132,9 @@ const char* rc_console_name(int console_id)
     case RC_CONSOLE_ORIC:
       return "Oric";
 
+    case RC_CONSOLE_PC6000:
+      return "PC-6000";
+
     case RC_CONSOLE_PC8800:
       return "PC-8000/8800";
 
@@ -136,7 +145,7 @@ const char* rc_console_name(int console_id)
       return "PC-FX";
 
     case RC_CONSOLE_PC_ENGINE:
-      return "PCEngine";
+      return "PC Engine";
 
     case RC_CONSOLE_PLAYSTATION:
       return "PlayStation";
@@ -155,6 +164,9 @@ const char* rc_console_name(int console_id)
 
     case RC_CONSOLE_SEGA_CD:
       return "Sega CD";
+	  
+    case RC_CONSOLE_PICO:
+      return "Sega Pico";
 
     case RC_CONSOLE_SATURN:
       return "Sega Saturn";
@@ -204,6 +216,9 @@ const char* rc_console_name(int console_id)
     case RC_CONSOLE_XBOX:
       return "XBOX";
 
+    case RC_CONSOLE_ZEEBO:
+      return "Zeebo";
+
     case RC_CONSOLE_ZX81:
       return "ZX-81";
 
@@ -227,12 +242,41 @@ static const rc_memory_region_t _rc_memory_regions_3do[] = {
 };
 static const rc_memory_regions_t rc_memory_regions_3do = { _rc_memory_regions_3do, 1 };
 
+/* ===== Amstrad CPC ===== */
+/* http://www.cpcalive.com/docs/amstrad_cpc_6128_memory_map.html */
+/* https://www.cpcwiki.eu/index.php/File:AWMG_page151.jpg */
+/* The original CPC only had 64KB of memory, but the newer model has 128KB (expandable to 576KB) */
+/* https://www.grimware.org/doku.php/documentations/devices/gatearraydo=export_xhtml#mmr */
+static const rc_memory_region_t _rc_memory_regions_amstrad_pc[] = {
+    { 0x000000U, 0x00003FU, 0x000000U, RC_MEMORY_TYPE_SYSTEM_RAM, "Firmware" },
+    { 0x000040U, 0x00B0FFU, 0x000040U, RC_MEMORY_TYPE_SYSTEM_RAM, "System RAM" },
+    { 0x00B100U, 0x00BFFFU, 0x00B100U, RC_MEMORY_TYPE_SYSTEM_RAM, "Stack and Firmware Data" },
+    { 0x00C000U, 0x00FFFFU, 0x00C000U, RC_MEMORY_TYPE_SYSTEM_RAM, "Screen Memory" },
+    { 0x010000U, 0x08FFFFU, 0x010000U, RC_MEMORY_TYPE_SYSTEM_RAM, "Extended RAM" },
+};
+static const rc_memory_regions_t rc_memory_regions_amstrad_pc = { _rc_memory_regions_amstrad_pc, 5 };
+
 /* ===== Apple II ===== */
 static const rc_memory_region_t _rc_memory_regions_appleii[] = {
     { 0x000000U, 0x00FFFFU, 0x000000U, RC_MEMORY_TYPE_SYSTEM_RAM, "Main RAM" },
     { 0x010000U, 0x01FFFFU, 0x010000U, RC_MEMORY_TYPE_SYSTEM_RAM, "Auxillary RAM" }
 };
 static const rc_memory_regions_t rc_memory_regions_appleii = { _rc_memory_regions_appleii, 2 };
+
+/* ===== Arduboy ===== */
+/* https://scienceprog.com/avr-microcontroller-memory-map/ (Atmega32) */
+static const rc_memory_region_t _rc_memory_regions_arduboy[] = {
+    { 0x000000U, 0x0000FFU, 0x00000000U, RC_MEMORY_TYPE_SYSTEM_RAM, "Registers" },
+    /* https://www.dailydot.com/debug/arduboy-kickstarter/ 2.5KB of RAM */
+    /* https://github.com/buserror/simavr/blob/1d227277b3d0039f9faef9ea62880ca3051b14f8/simavr/cores/avr/iom32u4.h#L1444-L1445 */
+    { 0x000100U, 0x000AFFU, 0x00000100U, RC_MEMORY_TYPE_SYSTEM_RAM, "System RAM" },
+    /* 1KB of EEPROM https://github.com/libretro/arduous/blob/93e1a6289b42ef48de1fcfb96443981725955ad0/src/arduous/arduous.cpp#L453-L455
+     * https://github.com/buserror/simavr/blob/1d227277b3d0039f9faef9ea62880ca3051b14f8/simavr/cores/avr/iom32u4.h#L1450 */
+    /* EEPROM has it's own addressing scheme starting at $0000. I've chosen to virtualize the address
+     * at $80000000 to avoid a conflict */
+    { 0x000B00U, 0x000EFFU, 0x80000000U, RC_MEMORY_TYPE_SAVE_RAM, "EEPROM" }
+};
+static const rc_memory_regions_t rc_memory_regions_arduboy = { _rc_memory_regions_arduboy, 3 };
 
 /* ===== Atari 2600 ===== */
 static const rc_memory_region_t _rc_memory_regions_atari2600[] = {
@@ -280,6 +324,13 @@ static const rc_memory_region_t _rc_memory_regions_colecovision[] = {
 };
 static const rc_memory_regions_t rc_memory_regions_colecovision = { _rc_memory_regions_colecovision, 1 };
 
+/* ===== Dreamcast ===== */
+/* http://archiv.sega-dc.de/munkeechuff/hardware/Memory.html */
+static const rc_memory_region_t _rc_memory_regions_dreamcast[] = {
+    { 0x00000000U, 0x00FFFFFFU, 0x0C000000U, RC_MEMORY_TYPE_SYSTEM_RAM, "System RAM" }
+};
+static const rc_memory_regions_t rc_memory_regions_dreamcast = { _rc_memory_regions_dreamcast, 1 };
+
 /* ===== GameBoy / GameBoy Color ===== */
 static const rc_memory_region_t _rc_memory_regions_gameboy[] = {
     { 0x000000U, 0x0000FFU, 0x000000U, RC_MEMORY_TYPE_HARDWARE_CONTROLLER, "Interrupt vector" },
@@ -323,19 +374,45 @@ static const rc_memory_region_t _rc_memory_regions_game_gear[] = {
 static const rc_memory_regions_t rc_memory_regions_game_gear = { _rc_memory_regions_game_gear, 1 };
 
 /* ===== Intellivision ===== */
-/* http://wiki.intellivision.us/index.php%3Ftitle%3DMemory_Map */
+/* http://wiki.intellivision.us/index.php/Memory_Map */
+/* NOTE: Intellivision memory addresses point at 16-bit values. FreeIntv exposes them as little-endian
+ *       32-bit values. As such, the addresses are off by a factor of 4 _and_ the data is only where we
+ *       expect it on little-endian systems.
+ */
 static const rc_memory_region_t _rc_memory_regions_intellivision[] = {
-    { 0x000000U, 0x00007FU, 0x000000U, RC_MEMORY_TYPE_VIDEO_RAM, "STIC Registers" },
-    { 0x000080U, 0x0000FFU, 0x000080U, RC_MEMORY_TYPE_UNUSED, "" },
-    { 0x000100U, 0x00035FU, 0x000100U, RC_MEMORY_TYPE_SYSTEM_RAM, "System RAM" },
-    { 0x000360U, 0x0003FFU, 0x000360U, RC_MEMORY_TYPE_UNUSED, "" },
-    { 0x000400U, 0x000FFFU, 0x000400U, RC_MEMORY_TYPE_SYSTEM_RAM, "Cartridge RAM" },
-    { 0x001000U, 0x001FFFU, 0x001000U, RC_MEMORY_TYPE_UNUSED, "" },
-    { 0x002000U, 0x002FFFU, 0x002000U, RC_MEMORY_TYPE_SYSTEM_RAM, "Cartridge RAM" },
-    { 0x003000U, 0x003FFFU, 0x003000U, RC_MEMORY_TYPE_VIDEO_RAM, "Video RAM" },
-    { 0x004000U, 0x00FFFFU, 0x004000U, RC_MEMORY_TYPE_SYSTEM_RAM, "Cartridge RAM" },
+    /* For backwards compatibility, register a 128-byte chunk of video RAM so the system memory
+     * will start at $0080. $0000-$007F previously tried to map to the STIC video registers as
+     * RETRO_MEMORY_VIDEO_RAM, and FreeIntv didn't expose any RETRO_MEMORY_VIDEO_RAM, so the first
+     * byte of RETRO_MEMORY_SYSTEM_RAM was registered at $0080. The data at $0080 is actually the
+     * STIC registers (4 bytes each), so we need to provide an arbitrary 128-byte padding that
+     * claims to be video RAM to ensure the system RAM ends up at the right address.
+     */
+    { 0x000000U, 0x00007FU, 0xFFFFFFU, RC_MEMORY_TYPE_VIDEO_RAM, "" },
+
+    /* RetroAchievements address = real address x4 + 0x80.
+     * These all have to map to RETRO_MEMORY_SYSTEM_RAM (even the video-related fields) as the
+     * entire block is exposed as a single entity by FreeIntv */
+
+    /* $0000-$007F: STIC registers, $0040-$007F are readonly */
+    { 0x000080U, 0x00027FU, 0x000000U, RC_MEMORY_TYPE_HARDWARE_CONTROLLER, "STIC Registers" },
+    /* $0080-$00FF: unused */
+    { 0x000280U, 0x00047FU, 0x000080U, RC_MEMORY_TYPE_UNUSED, "" },
+    /* $0100-$035F: system RAM, $0100-$01EF is scratch memory and only 8-bits per address */
+    { 0x000480U, 0x000DFFU, 0x000100U, RC_MEMORY_TYPE_SYSTEM_RAM, "System RAM" },
+    /* $0360-$03FF: unused */
+    { 0x000E00U, 0x00107FU, 0x000360U, RC_MEMORY_TYPE_UNUSED, "" },
+    /* $0400-$0FFF: cartridge RAM */
+    { 0x001080U, 0x00407FU, 0x000400U, RC_MEMORY_TYPE_SYSTEM_RAM, "Cartridge RAM" },
+    /* $1000-$1FFF: unused */
+    { 0x004080U, 0x00807FU, 0x001000U, RC_MEMORY_TYPE_UNUSED, "" },
+    /* $2000-$2FFF: cartridge RAM */
+    { 0x008080U, 0x00C07FU, 0x002000U, RC_MEMORY_TYPE_SYSTEM_RAM, "Cartridge RAM" },
+    /* $3000-$3FFF: video RAM */
+    { 0x00C080U, 0x01007FU, 0x003000U, RC_MEMORY_TYPE_HARDWARE_CONTROLLER, "Video RAM" },
+    /* $4000-$FFFF: cartridge RAM */
+    { 0x010080U, 0x04007FU, 0x004000U, RC_MEMORY_TYPE_SYSTEM_RAM, "Cartridge RAM" },
 };
-static const rc_memory_regions_t rc_memory_regions_intellivision = { _rc_memory_regions_intellivision, 9 };
+static const rc_memory_regions_t rc_memory_regions_intellivision = { _rc_memory_regions_intellivision, 10 };
 
 /* ===== Magnavox Odyssey 2 ===== */
 /* https://sudonull.com/post/76885-Architecture-and-programming-Philips-Videopac-Magnavox-Odyssey-2 */
@@ -447,13 +524,13 @@ static const rc_memory_regions_t rc_memory_regions_pc8800 = { _rc_memory_regions
 
 /* ===== PC Engine ===== */
 /* http://www.archaicpixels.com/Memory_Map */
-static const rc_memory_region_t _rc_memory_regions_pcengine[] = {
+static const rc_memory_region_t _rc_memory_regions_pc_engine[] = {
     { 0x000000U, 0x001FFFU, 0x1F0000U, RC_MEMORY_TYPE_SYSTEM_RAM, "System RAM" },
     { 0x002000U, 0x011FFFU, 0x100000U, RC_MEMORY_TYPE_SYSTEM_RAM, "CD RAM" },
     { 0x012000U, 0x041FFFU, 0x0D0000U, RC_MEMORY_TYPE_SYSTEM_RAM, "Super System Card RAM" },
     { 0x042000U, 0x0427FFU, 0x1EE000U, RC_MEMORY_TYPE_SAVE_RAM,   "CD Battery-backed RAM" }
 };
-static const rc_memory_regions_t rc_memory_regions_pcengine = { _rc_memory_regions_pcengine, 4 };
+static const rc_memory_regions_t rc_memory_regions_pc_engine = { _rc_memory_regions_pc_engine, 4 };
 
 /* ===== PC-FX ===== */
 /* http://daifukkat.su/pcfx/data/memmap.html */
@@ -479,6 +556,14 @@ static const rc_memory_region_t _rc_memory_regions_playstation2[] = {
     { 0x00100000U, 0x01FFFFFFU, 0x00100000U, RC_MEMORY_TYPE_SYSTEM_RAM, "System RAM" }
 };
 static const rc_memory_regions_t rc_memory_regions_playstation2 = { _rc_memory_regions_playstation2, 2 };
+
+/* ===== PlayStation Portable ===== */
+/* https://github.com/uofw/upspd/wiki/Memory-map */
+static const rc_memory_region_t _rc_memory_regions_psp[] = {
+    { 0x00000000U, 0x007FFFFFU, 0x08000000U, RC_MEMORY_TYPE_SYSTEM_RAM, "Kernel RAM" },
+    { 0x00800000U, 0x01FFFFFFU, 0x08800000U, RC_MEMORY_TYPE_SYSTEM_RAM, "System RAM" },
+};
+static const rc_memory_regions_t rc_memory_regions_psp = { _rc_memory_regions_psp, 2 };
 
 /* ===== Pokemon Mini ===== */
 /* https://www.pokemon-mini.net/documentation/memory-map/ */
@@ -612,8 +697,14 @@ const rc_memory_regions_t* rc_console_memory_regions(int console_id)
     case RC_CONSOLE_3DO:
       return &rc_memory_regions_3do;
 
+    case RC_CONSOLE_AMSTRAD_PC:
+      return &rc_memory_regions_amstrad_pc;
+
     case RC_CONSOLE_APPLE_II:
       return &rc_memory_regions_appleii;
+
+    case RC_CONSOLE_ARDUBOY:
+      return &rc_memory_regions_arduboy;
 
     case RC_CONSOLE_ATARI_2600:
       return &rc_memory_regions_atari2600;
@@ -630,6 +721,10 @@ const rc_memory_regions_t* rc_console_memory_regions(int console_id)
     case RC_CONSOLE_COLECOVISION:
       return &rc_memory_regions_colecovision;
 
+    case RC_CONSOLE_DREAMCAST:
+      return &rc_memory_regions_dreamcast;
+
+    case RC_CONSOLE_MEGADUCK:
     case RC_CONSOLE_GAMEBOY:
       return &rc_memory_regions_gameboy;
 
@@ -679,7 +774,7 @@ const rc_memory_regions_t* rc_console_memory_regions(int console_id)
       return &rc_memory_regions_pc8800;
 
     case RC_CONSOLE_PC_ENGINE:
-      return &rc_memory_regions_pcengine;
+      return &rc_memory_regions_pc_engine;
 
     case RC_CONSOLE_PCFX:
       return &rc_memory_regions_pcfx;
@@ -689,6 +784,9 @@ const rc_memory_regions_t* rc_console_memory_regions(int console_id)
 
     case RC_CONSOLE_PLAYSTATION_2:
       return &rc_memory_regions_playstation2;
+
+    case RC_CONSOLE_PSP:
+      return &rc_memory_regions_psp;
 
     case RC_CONSOLE_POKEMON_MINI:
       return &rc_memory_regions_pokemini;

@@ -229,11 +229,6 @@ bool HostInterface::ConfirmFormattedMessage(const char* format, ...)
   return ConfirmMessage(message.c_str());
 }
 
-void HostInterface::AddOSDMessage(std::string message, float duration /* = 2.0f */)
-{
-  Log_InfoPrintf("OSD: %s", message.c_str());
-}
-
 void HostInterface::AddFormattedOSDMessage(float duration, const char* format, ...)
 {
   std::va_list ap;
@@ -242,6 +237,16 @@ void HostInterface::AddFormattedOSDMessage(float duration, const char* format, .
   va_end(ap);
 
   AddOSDMessage(std::move(message), duration);
+}
+
+void HostInterface::AddKeyedFormattedOSDMessage(std::string key, float duration, const char* format, ...)
+{
+  std::va_list ap;
+  va_start(ap, format);
+  std::string message = StringUtil::StdStringFromFormatV(format, ap);
+  va_end(ap);
+
+  AddKeyedOSDMessage(std::move(key), std::move(message), duration);
 }
 
 std::string HostInterface::GetBIOSDirectory()
@@ -455,25 +460,6 @@ bool HostInterface::SaveState(const char* filename)
 
   return result;
 }
-
-void HostInterface::OnSystemCreated() {}
-
-void HostInterface::OnSystemPaused(bool paused) {}
-
-void HostInterface::OnSystemDestroyed() {}
-
-void HostInterface::OnSystemPerformanceCountersUpdated() {}
-
-void HostInterface::OnDisplayInvalidated() {}
-
-void HostInterface::OnSystemStateSaved(bool global, s32 slot) {}
-
-void HostInterface::OnRunningGameChanged(const std::string& path, CDImage* image, const std::string& game_code,
-                                         const std::string& game_title)
-{
-}
-
-void HostInterface::OnControllerTypeChanged(u32 slot) {}
 
 std::string HostInterface::GetShaderCacheBasePath() const
 {
@@ -703,27 +689,6 @@ void HostInterface::FixIncompatibleSettings(bool display_osd_messages)
     g_settings.rewind_enable = false;
   }
 #endif
-
-  // rewinding causes issues with mmap fastmem, so just use LUT
-  if ((g_settings.rewind_enable || g_settings.IsRunaheadEnabled()) && g_settings.IsUsingFastmem() &&
-      g_settings.cpu_fastmem_mode == CPUFastmemMode::MMap)
-  {
-    Log_WarningPrintf("Disabling mmap fastmem due to rewind being enabled");
-    g_settings.cpu_fastmem_mode = CPUFastmemMode::LUT;
-  }
-
-  // code compilation is too slow with runahead, use the recompiler
-  if (g_settings.IsRunaheadEnabled() && g_settings.IsUsingCodeCache())
-  {
-    Log_WarningPrintf("Code cache/recompiler disabled due to runahead");
-    g_settings.cpu_execution_mode = CPUExecutionMode::Interpreter;
-  }
-
-  if (g_settings.IsRunaheadEnabled() && g_settings.rewind_enable)
-  {
-    Log_WarningPrintf("Rewind disabled due to runahead being enabled");
-    g_settings.rewind_enable = false;
-  }
 }
 
 void HostInterface::SaveSettings(SettingsInterface& si)
@@ -1109,8 +1074,8 @@ void HostInterface::ToggleSoftwareRendering()
 
   const GPURenderer new_renderer = g_gpu->IsHardwareRenderer() ? GPURenderer::Software : g_settings.gpu_renderer;
 
-  AddFormattedOSDMessage(5.0f, TranslateString("OSDMessage", "Switching to %s renderer..."),
-                         Settings::GetRendererDisplayName(new_renderer));
+  AddKeyedFormattedOSDMessage("SoftwareRendering", 5.0f, TranslateString("OSDMessage", "Switching to %s renderer..."),
+                              Settings::GetRendererDisplayName(new_renderer));
   System::RecreateGPU(new_renderer);
   OnDisplayInvalidated();
 }
@@ -1197,13 +1162,3 @@ void HostInterface::RecreateSystem()
   System::ResetThrottler();
   OnDisplayInvalidated();
 }
-
-void HostInterface::SetMouseMode(bool relative, bool hide_cursor) {}
-
-void HostInterface::DisplayLoadingScreen(const char* message, int progress_min /*= -1*/, int progress_max /*= -1*/,
-                                         int progress_value /*= -1*/)
-{
-  Log_InfoPrintf("Loading: %s %d of %d-%d", message, progress_value, progress_min, progress_max);
-}
-
-void HostInterface::GetGameInfo(const char* path, CDImage* image, std::string* code, std::string* title) {}

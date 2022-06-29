@@ -7,13 +7,14 @@
 #include "core/controller.h"
 #include "core/gpu.h"
 #include "core/host_display.h"
+#include "core/imgui_fullscreen.h"
+#include "core/imgui_styles.h"
 #include "core/system.h"
 #include "frontend-common/controller_interface.h"
 #include "frontend-common/d3d11_host_display.h"
 #include "frontend-common/d3d12_host_display.h"
 #include "frontend-common/fullscreen_ui.h"
 #include "frontend-common/icon.h"
-#include "frontend-common/imgui_styles.h"
 #include "frontend-common/ini_settings_interface.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -145,14 +146,11 @@ bool UWPHostInterface::CreateDisplay(bool fullscreen)
         GAMING_DEVICE_MODEL_INFORMATION gdinfo = {};
         if (SUCCEEDED(GetGamingDeviceModelInformation(&gdinfo)) && gdinfo.vendorId == GAMING_DEVICE_VENDOR_ID_MICROSOFT)
         {
-          if (gdinfo.deviceId != GAMING_DEVICE_DEVICE_ID_XBOX_ONE)
-          {
-            Log_InfoPrintf("Overriding core window size %ux%u with HDMI size %ux%u", wi.surface_width,
-                           wi.surface_height, hdmi_width, hdmi_height);
-            wi.surface_scale *= static_cast<float>(hdmi_width) / static_cast<float>(wi.surface_width);
-            wi.surface_width = hdmi_width;
-            wi.surface_height = hdmi_height;
-          }
+          Log_InfoPrintf("Overriding core window size %ux%u with HDMI size %ux%u", wi.surface_width, wi.surface_height,
+                         hdmi_width, hdmi_height);
+          wi.surface_scale *= static_cast<float>(hdmi_width) / static_cast<float>(wi.surface_width);
+          wi.surface_width = hdmi_width;
+          wi.surface_height = hdmi_height;
         }
       }
     }
@@ -237,6 +235,8 @@ void UWPHostInterface::RequestExit()
   m_dispatcher.RunAsync(winrt::Windows::UI::Core::CoreDispatcherPriority::Normal,
                         [this]() { winrt::Windows::ApplicationModel::Core::CoreApplication::Exit(); });
 }
+
+void UWPHostInterface::SetMouseMode(bool relative, bool hide_cursor) {}
 
 void UWPHostInterface::Run()
 {
@@ -386,6 +386,10 @@ void UWPHostInterface::RunLater(std::function<void()> callback)
   m_queued_callbacks.push_back(std::move(callback));
 }
 
+void UWPHostInterface::OnDisplayInvalidated() {}
+
+void UWPHostInterface::OnSystemPerformanceCountersUpdated() {}
+
 bool UWPHostInterface::IsFullscreen() const
 {
   return m_appview.IsFullScreenMode();
@@ -504,13 +508,17 @@ void UWPHostInterface::OnClosed(const IInspectable&, const winrt::Windows::UI::C
 void UWPHostInterface::OnSizeChanged(const IInspectable&,
                                      const winrt::Windows::UI::Core::WindowSizeChangedEventArgs& args)
 {
-  const auto size = args.Size();
-  const s32 width = static_cast<s32>(size.Width * m_display->GetWindowScale());
-  const s32 height = static_cast<s32>(size.Height * m_display->GetWindowScale());
   if (IsEmulationThreadRunning())
   {
+    const auto size = args.Size();
+    const float width = size.Width;
+    const float height = size.Height;
     RunLater([this, width, height]() {
-      m_display->ResizeRenderWindow(width, height);
+      if (!m_display)
+        return;
+
+      m_display->ResizeRenderWindow(static_cast<s32>(width * m_display->GetWindowScale()),
+                                    static_cast<s32>(height * m_display->GetWindowScale()));
       OnHostDisplayResized();
     });
   }

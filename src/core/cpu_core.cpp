@@ -67,9 +67,6 @@ void StopTrace()
 
 void WriteToExecutionLog(const char* format, ...)
 {
-  std::va_list ap;
-  va_start(ap, format);
-
   if (!s_log_file_opened)
   {
     s_log_file = FileSystem::OpenCFile("cpu_log.txt", "wb");
@@ -78,13 +75,15 @@ void WriteToExecutionLog(const char* format, ...)
 
   if (s_log_file)
   {
+    std::va_list ap;
+    va_start(ap, format);
     std::vfprintf(s_log_file, format, ap);
+    va_end(ap);
+
 #ifdef _DEBUG
     std::fflush(s_log_file);
 #endif
   }
-
-  va_end(ap);
 }
 
 void Initialize()
@@ -539,6 +538,8 @@ ALWAYS_INLINE_RELEASE void Cop0DataBreakpointCheck(VirtualMemoryAddress address)
   DispatchCop0Breakpoint();
 }
 
+#ifdef _DEBUG
+
 static void TracePrintInstruction()
 {
   const u32 pc = g_state.current_instruction_pc;
@@ -558,6 +559,8 @@ static void TracePrintInstruction()
 
   std::printf("%08x: %08x %s\n", pc, bits, instr.GetCharArray());
 }
+
+#endif
 
 static void PrintInstruction(u32 bits, u32 pc, Registers* regs, const char* prefix)
 {

@@ -3,11 +3,9 @@
 #include "common/state_wrapper.h"
 #include "cpu_core.h"
 #include "dma.h"
+#include "imgui.h"
 #include "interrupt_controller.h"
 #include "system.h"
-#ifdef WITH_IMGUI
-#include "imgui.h"
-#endif
 Log_SetChannel(MDEC);
 
 MDEC g_mdec;
@@ -131,7 +129,7 @@ void MDEC::DMARead(u32* words, u32 word_count)
     word_count -= words_to_read;
   }
 
-  Log_DebugPrintf("DMA read complete, %u bytes left", m_data_out_fifo.GetSize() * sizeof(u32));
+  Log_DebugPrintf("DMA read complete, %u bytes left", static_cast<u32>(m_data_out_fifo.GetSize() * sizeof(u32)));
   if (m_data_out_fifo.IsEmpty())
     Execute();
 }
@@ -540,7 +538,7 @@ void MDEC::CopyOutBlock()
   }
 
   Log_DebugPrintf("Block copied out, fifo size = %u (%u bytes)", m_data_out_fifo.GetSize(),
-                  m_data_out_fifo.GetSize() * sizeof(u32));
+                  static_cast<u32>(m_data_out_fifo.GetSize() * sizeof(u32)));
 
   // if we've copied out all blocks, command is complete
   m_state = (m_remaining_halfwords == 0) ? State::Idle : State::DecodingMacroblock;
@@ -595,26 +593,28 @@ bool MDEC::rl_decode_block(s16* blk, const u8* qt)
     m_remaining_halfwords--;
 
     m_current_coefficient += ((n >> 10) & 0x3F) + 1;
-    if (m_current_coefficient >= 64)
+    if (m_current_coefficient < 64)
+    {
+      s32 val = (SignExtendN<10, s32>(static_cast<s32>(n & 0x3FF)) *
+                   static_cast<s32>(ZeroExtend32(qt[m_current_coefficient])) * static_cast<s32>(m_current_q_scale) +
+                 4) /
+                8;
+
+      if (m_current_q_scale == 0)
+        val = SignExtendN<10, s32>(static_cast<s32>(n & 0x3FF)) * 2;
+
+      val = std::clamp(val, -0x400, 0x3FF);
+      if (m_current_q_scale > 0)
+        blk[zagzig[m_current_coefficient]] = static_cast<s16>(val);
+      else if (m_current_q_scale == 0)
+        blk[m_current_coefficient] = static_cast<s16>(val);
+    }
+
+    if (m_current_coefficient >= 63)
     {
       m_current_coefficient = 64;
       return true;
     }
-
-    s32 val = (SignExtendN<10, s32>(static_cast<s32>(n & 0x3FF)) *
-                 static_cast<s32>(ZeroExtend32(qt[m_current_coefficient])) * static_cast<s32>(m_current_q_scale) +
-               4) /
-              8;
-
-    if (m_current_q_scale == 0)
-      val = SignExtendN<10, s32>(static_cast<s32>(n & 0x3FF)) * 2;
-
-    val = std::clamp(val, -0x400, 0x3FF);
-    // val = val * static_cast<s32>(ZeroExtend32(scalezag[i]));
-    if (m_current_q_scale > 0)
-      blk[zagzig[m_current_coefficient]] = static_cast<s16>(val);
-    else if (m_current_q_scale == 0)
-      blk[m_current_coefficient] = static_cast<s16>(val);
   }
 
   return false;
@@ -722,7 +722,6 @@ void MDEC::HandleSetScaleCommand()
 
 void MDEC::DrawDebugStateWindow()
 {
-#ifdef WITH_IMGUI
   const float framebuffer_scale = ImGui::GetIO().DisplayFramebufferScale.x;
 
   ImGui::SetNextWindowSize(ImVec2(300.0f * framebuffer_scale, 350.0f * framebuffer_scale), ImGuiCond_FirstUseEver);
@@ -760,5 +759,4 @@ void MDEC::DrawDebugStateWindow()
   }
 
   ImGui::End();
-#endif
 }

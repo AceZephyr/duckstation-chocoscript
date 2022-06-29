@@ -15,6 +15,8 @@
 #include "core/gpu.h"
 #include "core/gte.h"
 #include "core/host_display.h"
+#include "core/imgui_fullscreen.h"
+#include "core/imgui_styles.h"
 #include "core/mdec.h"
 #include "core/pgxp.h"
 #include "core/save_state_version.h"
@@ -27,8 +29,6 @@
 #include "game_list.h"
 #include "icon.h"
 #include "imgui.h"
-#include "imgui_fullscreen.h"
-#include "imgui_styles.h"
 #include "inhibit_screensaver.h"
 #include "ini_settings_interface.h"
 #include "input_overlay_ui.h"
@@ -52,7 +52,7 @@
 #endif
 
 #ifdef WITH_CHEEVOS
-#include "cheevos.h"
+#include "core/cheevos.h"
 #endif
 
 #ifdef _WIN32
@@ -114,6 +114,11 @@ bool CommonHostInterface::Initialize()
   CreateImGuiContext();
 
 #ifdef WITH_CHEEVOS
+#ifdef WITH_RAINTEGRATION
+  if (GetBoolSettingValue("Cheevos", "UseRAIntegration", false))
+    Cheevos::SwitchToRAIntegration();
+#endif
+
   UpdateCheevosActive();
 #endif
 
@@ -251,10 +256,6 @@ void CommonHostInterface::PowerOffSystem(bool save_resume_state)
 void CommonHostInterface::ResetSystem()
 {
   HostInterface::ResetSystem();
-
-#ifdef WITH_CHEEVOS
-  Cheevos::Reset();
-#endif
 }
 
 static void PrintCommandLineVersion(const char* frontend_name)
@@ -531,9 +532,7 @@ bool CommonHostInterface::ParseCommandLineParameters(int argc, char* argv[],
 
 void CommonHostInterface::OnAchievementsRefreshed()
 {
-#ifdef WITH_CHEEVOS
   // noop
-#endif
 }
 
 void CommonHostInterface::PollAndUpdate()
@@ -801,10 +800,6 @@ bool CommonHostInterface::UndoLoadState()
   System::ResetPerformanceCounters();
   System::ResetThrottler();
 
-#ifdef WITH_CHEEVOS
-  Cheevos::Reset();
-#endif
-
   Log_InfoPrintf("Loaded undo save state.");
   m_undo_load_state.reset();
   return true;
@@ -871,11 +866,7 @@ bool CommonHostInterface::SaveState(bool global, s32 slot)
 
   std::string save_path = global ? GetGlobalSaveStateFileName(slot) : GetGameSaveStateFileName(code.c_str(), slot);
   RenameCurrentSaveStateToBackup(save_path.c_str());
-  if (!SaveState(save_path.c_str()))
-    return false;
-
-  OnSystemStateSaved(global, slot);
-  return true;
+  return SaveState(save_path.c_str());
 }
 
 bool CommonHostInterface::CanResumeSystemFromFile(const char* filename)
@@ -1121,8 +1112,6 @@ void CommonHostInterface::SetUserDirectory()
 
 void CommonHostInterface::OnSystemCreated()
 {
-  HostInterface::OnSystemCreated();
-
   if (m_fullscreen_ui_enabled)
     FullscreenUI::SystemCreated();
 
@@ -1158,8 +1147,6 @@ void CommonHostInterface::OnSystemDestroyed()
   if (m_display)
     m_display->SetDisplayMaxFPS(0.0f);
 
-  HostInterface::OnSystemDestroyed();
-
   if (m_fullscreen_ui_enabled)
     FullscreenUI::SystemDestroyed();
 
@@ -1170,8 +1157,6 @@ void CommonHostInterface::OnSystemDestroyed()
 void CommonHostInterface::OnRunningGameChanged(const std::string& path, CDImage* image, const std::string& game_code,
                                                const std::string& game_title)
 {
-  HostInterface::OnRunningGameChanged(path, image, game_code, game_title);
-
   if (g_settings.apply_game_settings)
     ApplySettings(true);
 
@@ -1197,8 +1182,6 @@ void CommonHostInterface::OnRunningGameChanged(const std::string& path, CDImage*
 
 void CommonHostInterface::OnControllerTypeChanged(u32 slot)
 {
-  HostInterface::OnControllerTypeChanged(slot);
-
   UpdateInputMap();
 }
 
@@ -1393,13 +1376,12 @@ void CommonHostInterface::DrawEnhancementsOverlay()
       text.AppendString("/Depth");
   }
 
-  float shadow_offset, margin, spacing, position_y;
+  float shadow_offset, margin, position_y;
   ImFont* font;
 
   if (m_fullscreen_ui_enabled)
   {
     margin = ImGuiFullscreen::LayoutScale(10.0f);
-    spacing = margin;
     shadow_offset = ImGuiFullscreen::DPIScale(1.0f);
     font = ImGuiFullscreen::g_medium_font;
     position_y = ImGui::GetIO().DisplaySize.y - margin - font->FontSize;
@@ -1409,7 +1391,6 @@ void CommonHostInterface::DrawEnhancementsOverlay()
     const float scale = ImGui::GetIO().DisplayFramebufferScale.x;
     shadow_offset = 1.0f * scale;
     margin = 10.0f * scale;
-    spacing = 5.0f * scale;
     font = ImGui::GetFont();
     position_y = ImGui::GetIO().DisplaySize.y - margin - font->FontSize;
   }
@@ -1429,6 +1410,27 @@ void CommonHostInterface::AddOSDMessage(std::string message, float duration /*= 
   OSDMessage msg;
   msg.text = std::move(message);
   msg.duration = duration;
+
+  std::unique_lock<std::mutex> lock(m_osd_messages_lock);
+  m_osd_posted_messages.push_back(std::move(msg));
+}
+
+void CommonHostInterface::AddKeyedOSDMessage(std::string key, std::string message, float duration /*= 2.0f*/)
+{
+  OSDMessage msg;
+  msg.key = std::move(key);
+  msg.text = std::move(message);
+  msg.duration = duration;
+
+  std::unique_lock<std::mutex> lock(m_osd_messages_lock);
+  m_osd_posted_messages.push_back(std::move(msg));
+}
+
+void CommonHostInterface::RemoveKeyedOSDMessage(std::string key)
+{
+  OSDMessage msg;
+  msg.key = std::move(key);
+  msg.duration = 0.0f;
 
   std::unique_lock<std::mutex> lock(m_osd_messages_lock);
   m_osd_posted_messages.push_back(std::move(msg));
@@ -1470,7 +1472,23 @@ void CommonHostInterface::AcquirePendingOSDMessages()
         break;
 
       if (g_settings.display_show_osd_messages)
-        m_osd_active_messages.push_back(std::move(m_osd_posted_messages.front()));
+      {
+        OSDMessage& new_msg = m_osd_posted_messages.front();
+        std::deque<OSDMessage>::iterator iter;
+        if (!new_msg.key.empty() && (iter = std::find_if(m_osd_active_messages.begin(), m_osd_active_messages.end(),
+                                                         [&new_msg](const OSDMessage& other) {
+                                                           return new_msg.key == other.key;
+                                                         })) != m_osd_active_messages.end())
+        {
+          iter->text = std::move(new_msg.text);
+          iter->duration = new_msg.duration;
+          iter->time = new_msg.time;
+        }
+        else
+        {
+          m_osd_active_messages.push_back(std::move(new_msg));
+        }
+      }
 
       m_osd_posted_messages.pop_front();
 
@@ -1591,15 +1609,16 @@ void CommonHostInterface::DoToggleCheats()
   CheatList* cl = System::GetCheatList();
   if (!cl)
   {
-    AddOSDMessage(TranslateStdString("OSDMessage", "No cheats are loaded."), 10.0f);
+    AddKeyedOSDMessage("ToggleCheats", TranslateStdString("OSDMessage", "No cheats are loaded."), 10.0f);
     return;
   }
 
   cl->SetMasterEnable(!cl->GetMasterEnable());
-  AddOSDMessage(cl->GetMasterEnable() ?
-                  TranslateStdString("OSDMessage", "%n cheats are now active.", "", cl->GetEnabledCodeCount()) :
-                  TranslateStdString("OSDMessage", "%n cheats are now inactive.", "", cl->GetEnabledCodeCount()),
-                10.0f);
+  AddKeyedOSDMessage("ToggleCheats",
+                     cl->GetMasterEnable() ?
+                       TranslateStdString("OSDMessage", "%n cheats are now active.", "", cl->GetEnabledCodeCount()) :
+                       TranslateStdString("OSDMessage", "%n cheats are now inactive.", "", cl->GetEnabledCodeCount()),
+                     10.0f);
 }
 
 std::optional<CommonHostInterface::HostKeyCode>
@@ -2241,16 +2260,17 @@ void CommonHostInterface::SetRewindState(bool enabled)
     if (!g_settings.rewind_enable)
     {
       if (enabled)
-        AddOSDMessage(TranslateStdString("OSDMessage", "Rewinding is not enabled."), 5.0f);
+        AddKeyedOSDMessage("SetRewindState", TranslateStdString("OSDMessage", "Rewinding is not enabled."), 5.0f);
 
       return;
     }
 
     if (!m_fullscreen_ui_enabled)
     {
-      AddOSDMessage(enabled ? TranslateStdString("OSDMessage", "Rewinding...") :
-                              TranslateStdString("OSDMessage", "Stopped rewinding."),
-                    5.0f);
+      AddKeyedOSDMessage("SetRewindState",
+                         enabled ? TranslateStdString("OSDMessage", "Rewinding...") :
+                                   TranslateStdString("OSDMessage", "Stopped rewinding."),
+                         5.0f);
     }
 
     System::SetRewinding(enabled);
@@ -2454,17 +2474,54 @@ void CommonHostInterface::RegisterSystemHotkeys()
           const u32 percent = g_settings.GetCPUOverclockPercent();
           const double clock_speed =
             ((static_cast<double>(System::MASTER_CLOCK) * static_cast<double>(percent)) / 100.0) / 1000000.0;
-          AddFormattedOSDMessage(5.0f,
-                                 TranslateString("OSDMessage", "CPU clock speed control enabled (%u%% / %.3f MHz)."),
-                                 percent, clock_speed);
+          AddKeyedFormattedOSDMessage(
+            "ToggleOverclocking", 5.0f,
+            TranslateString("OSDMessage", "CPU clock speed control enabled (%u%% / %.3f MHz)."), percent, clock_speed);
         }
         else
         {
-          AddFormattedOSDMessage(5.0f, TranslateString("OSDMessage", "CPU clock speed control disabled (%.3f MHz)."),
-                                 static_cast<double>(System::MASTER_CLOCK) / 1000000.0);
+          AddKeyedFormattedOSDMessage("ToggleOverclocking", 5.0f,
+                                      TranslateString("OSDMessage", "CPU clock speed control disabled (%.3f MHz)."),
+                                      static_cast<double>(System::MASTER_CLOCK) / 1000000.0);
         }
       }
     });
+
+  RegisterHotkey(StaticString(TRANSLATABLE("Hotkeys", "System")), StaticString("IncreaseEmulationSpeed"),
+                 StaticString(TRANSLATABLE("Hotkeys", "Increase Emulation Speed")), [this](bool pressed) {
+                   if (pressed && System::IsValid())
+                   {
+                     g_settings.emulation_speed += 0.1f;
+                     UpdateSpeedLimiterState();
+                     AddKeyedFormattedOSDMessage("EmulationSpeedChange", 5.0f,
+                                                 TranslateString("OSDMessage", "Emulation speed set to %u%%."),
+                                                 static_cast<u32>(std::lround(g_settings.emulation_speed * 100.0f)));
+                   }
+                 });
+
+  RegisterHotkey(StaticString(TRANSLATABLE("Hotkeys", "System")), StaticString("DecreaseEmulationSpeed"),
+                 StaticString(TRANSLATABLE("Hotkeys", "Decrease Emulation Speed")), [this](bool pressed) {
+                   if (pressed && System::IsValid())
+                   {
+                     g_settings.emulation_speed = std::max(g_settings.emulation_speed - 0.1f, 0.1f);
+                     UpdateSpeedLimiterState();
+                     AddKeyedFormattedOSDMessage("EmulationSpeedChange", 5.0f,
+                                                 TranslateString("OSDMessage", "Emulation speed set to %u%%."),
+                                                 static_cast<u32>(std::lround(g_settings.emulation_speed * 100.0f)));
+                   }
+                 });
+
+  RegisterHotkey(StaticString(TRANSLATABLE("Hotkeys", "System")), StaticString("ResetEmulationSpeed"),
+                 StaticString(TRANSLATABLE("Hotkeys", "Reset Emulation Speed")), [this](bool pressed) {
+                   if (pressed && System::IsValid())
+                   {
+                     g_settings.emulation_speed = GetFloatSettingValue("Main", "EmulationSpeed", 1.0f);
+                     UpdateSpeedLimiterState();
+                     AddKeyedFormattedOSDMessage("EmulationSpeedChange", 5.0f,
+                                                 TranslateString("OSDMessage", "Emulation speed set to %u%%."),
+                                                 static_cast<u32>(std::lround(g_settings.emulation_speed * 100.0f)));
+                   }
+                 });
 }
 
 void CommonHostInterface::RegisterGraphicsHotkeys()
@@ -2484,10 +2541,11 @@ void CommonHostInterface::RegisterGraphicsHotkeys()
                      g_gpu->UpdateSettings();
                      g_gpu->ResetGraphicsAPIState();
                      System::ClearMemorySaveStates();
-                     AddOSDMessage(g_settings.gpu_pgxp_enable ?
-                                     TranslateStdString("OSDMessage", "PGXP is now enabled.") :
-                                     TranslateStdString("OSDMessage", "PGXP is now disabled."),
-                                   5.0f);
+                     AddKeyedOSDMessage("TogglePGXP",
+                                        g_settings.gpu_pgxp_enable ?
+                                          TranslateStdString("OSDMessage", "PGXP is now enabled.") :
+                                          TranslateStdString("OSDMessage", "PGXP is now disabled."),
+                                        5.0f);
 
                      if (g_settings.gpu_pgxp_enable)
                        PGXP::Initialize();
@@ -2528,7 +2586,8 @@ void CommonHostInterface::RegisterGraphicsHotkeys()
                  StaticString(TRANSLATABLE("Hotkeys", "Reload Texture Replacements")), [this](bool pressed) {
                    if (pressed && System::IsValid())
                    {
-                     AddOSDMessage(TranslateStdString("OSDMessage", "Texture replacements reloaded."), 10.0f);
+                     AddKeyedOSDMessage("ReloadTextureReplacements",
+                                        TranslateStdString("OSDMessage", "Texture replacements reloaded."), 10.0f);
                      g_texture_replacements.Reload();
                    }
                  });
@@ -2553,10 +2612,11 @@ void CommonHostInterface::RegisterGraphicsHotkeys()
                      g_gpu->UpdateSettings();
                      g_gpu->ResetGraphicsAPIState();
                      System::ClearMemorySaveStates();
-                     AddOSDMessage(g_settings.gpu_pgxp_depth_buffer ?
-                                     TranslateStdString("OSDMessage", "PGXP Depth Buffer is now enabled.") :
-                                     TranslateStdString("OSDMessage", "PGXP Depth Buffer is now disabled."),
-                                   5.0f);
+                     AddKeyedOSDMessage("TogglePGXPDepth",
+                                        g_settings.gpu_pgxp_depth_buffer ?
+                                          TranslateStdString("OSDMessage", "PGXP Depth Buffer is now enabled.") :
+                                          TranslateStdString("OSDMessage", "PGXP Depth Buffer is now disabled."),
+                                        5.0f);
                    }
                  });
 
@@ -2565,24 +2625,25 @@ void CommonHostInterface::RegisterGraphicsHotkeys()
                    if (pressed && System::IsValid())
                    {
                      g_settings.gpu_pgxp_cpu = !g_settings.gpu_pgxp_cpu;
+                     if (!g_settings.gpu_pgxp_enable)
+                       return;
+
                      g_gpu->RestoreGraphicsAPIState();
                      g_gpu->UpdateSettings();
                      g_gpu->ResetGraphicsAPIState();
                      System::ClearMemorySaveStates();
-                     AddOSDMessage(g_settings.gpu_pgxp_cpu ?
-                                     TranslateStdString("OSDMessage", "PGXP CPU mode is now enabled.") :
-                                     TranslateStdString("OSDMessage", "PGXP CPU mode is now disabled."),
-                                   5.0f);
+                     AddKeyedOSDMessage("TogglePGXPCPU",
+                                        g_settings.gpu_pgxp_cpu ?
+                                          TranslateStdString("OSDMessage", "PGXP CPU mode is now enabled.") :
+                                          TranslateStdString("OSDMessage", "PGXP CPU mode is now disabled."),
+                                        5.0f);
 
-                     if (g_settings.gpu_pgxp_enable)
-                     {
-                       PGXP::Shutdown();
-                       PGXP::Initialize();
+                     PGXP::Shutdown();
+                     PGXP::Initialize();
 
-                       // we need to recompile all blocks if pgxp is toggled on/off
-                       if (g_settings.IsUsingCodeCache())
-                         CPU::CodeCache::Flush();
-                     }
+                     // we need to recompile all blocks if pgxp is toggled on/off
+                     if (g_settings.IsUsingCodeCache())
+                       CPU::CodeCache::Flush();
                    }
                  });
 }
@@ -2716,9 +2777,15 @@ void CommonHostInterface::RegisterAudioHotkeys()
                      const s32 volume = GetAudioOutputVolume();
                      m_audio_stream->SetOutputVolume(volume);
                      if (g_settings.audio_output_muted)
-                       AddOSDMessage(TranslateStdString("OSDMessage", "Volume: Muted"), 2.0f);
+                     {
+                       AddKeyedOSDMessage("AudioControlHotkey", TranslateStdString("OSDMessage", "Volume: Muted"),
+                                          2.0f);
+                     }
                      else
-                       AddFormattedOSDMessage(2.0f, TranslateString("OSDMessage", "Volume: %d%%"), volume);
+                     {
+                       AddKeyedFormattedOSDMessage("AudioControlHotkey", 2.0f,
+                                                   TranslateString("OSDMessage", "Volume: %d%%"), volume);
+                     }
                    }
                  });
   RegisterHotkey(StaticString(TRANSLATABLE("Hotkeys", "Audio")), StaticString("AudioCDAudioMute"),
@@ -2726,10 +2793,11 @@ void CommonHostInterface::RegisterAudioHotkeys()
                    if (pressed && System::IsValid())
                    {
                      g_settings.cdrom_mute_cd_audio = !g_settings.cdrom_mute_cd_audio;
-                     AddOSDMessage(g_settings.cdrom_mute_cd_audio ?
-                                     TranslateStdString("OSDMessage", "CD Audio Muted.") :
-                                     TranslateStdString("OSDMessage", "CD Audio Unmuted."),
-                                   2.0f);
+                     AddKeyedOSDMessage("AudioControlHotkey",
+                                        g_settings.cdrom_mute_cd_audio ?
+                                          TranslateStdString("OSDMessage", "CD Audio Muted.") :
+                                          TranslateStdString("OSDMessage", "CD Audio Unmuted."),
+                                        2.0f);
                    }
                  });
   RegisterHotkey(StaticString(TRANSLATABLE("Hotkeys", "Audio")), StaticString("AudioVolumeUp"),
@@ -2742,7 +2810,8 @@ void CommonHostInterface::RegisterAudioHotkeys()
                      g_settings.audio_output_volume = volume;
                      g_settings.audio_fast_forward_volume = volume;
                      m_audio_stream->SetOutputVolume(volume);
-                     AddFormattedOSDMessage(2.0f, TranslateString("OSDMessage", "Volume: %d%%"), volume);
+                     AddKeyedFormattedOSDMessage("AudioControlHotkey", 2.0f,
+                                                 TranslateString("OSDMessage", "Volume: %d%%"), volume);
                    }
                  });
   RegisterHotkey(StaticString(TRANSLATABLE("Hotkeys", "Audio")), StaticString("AudioVolumeDown"),
@@ -2755,7 +2824,8 @@ void CommonHostInterface::RegisterAudioHotkeys()
                      g_settings.audio_output_volume = volume;
                      g_settings.audio_fast_forward_volume = volume;
                      m_audio_stream->SetOutputVolume(volume);
-                     AddFormattedOSDMessage(2.0f, TranslateString("OSDMessage", "Volume: %d%%"), volume);
+                     AddKeyedFormattedOSDMessage("AudioControlHotkey", 2.0f,
+                                                 TranslateString("OSDMessage", "Volume: %d%%"), volume);
                    }
                  });
 }
@@ -2854,8 +2924,8 @@ bool CommonHostInterface::ApplyInputProfile(const char* profile_path)
       continue;
     }
 
+    // We don't need to call ControllerTypeChanged here because we're already updating the input map.
     g_settings.controller_types[controller_index - 1] = *ctype;
-    HostInterface::OnControllerTypeChanged(controller_index - 1);
 
     m_settings_interface->SetStringValue(section_name, "Type", Settings::GetControllerTypeName(*ctype));
 
@@ -2891,6 +2961,25 @@ bool CommonHostInterface::ApplyInputProfile(const char* profile_path)
       const std::string value = profile.GetStringValue(section_name, ssi.key, "");
       if (!value.empty())
         m_settings_interface->SetStringValue(section_name, ssi.key, value.c_str());
+    }
+
+    for (u32 autofire_index = 0; autofire_index < NUM_CONTROLLER_AUTOFIRE_BUTTONS; autofire_index++)
+    {
+      const auto button_key_name = TinyString::FromFormat("AutoFire%uButton", autofire_index + 1);
+      const std::string button_name(profile.GetStringValue(section_name, button_key_name, ""));
+      if (button_name.empty())
+        continue;
+
+      m_settings_interface->SetStringValue(section_name, button_key_name, button_name.c_str());
+
+      const auto binding_key_name = TinyString::FromFormat("AutoFire%u", autofire_index + 1);
+      const std::vector<std::string> bindings = profile.GetStringList(section_name, binding_key_name);
+      for (const std::string& binding : bindings)
+        m_settings_interface->AddToStringList(section_name, binding_key_name, binding.c_str());
+
+      const auto frequency_key_name = TinyString::FromFormat("AutoFire%uFrequency", autofire_index + 1);
+      const int frequency = profile.GetIntValue(section_name, frequency_key_name, DEFAULT_AUTOFIRE_FREQUENCY);
+      m_settings_interface->SetIntValue(section_name, frequency_key_name, frequency);
     }
   }
 
@@ -2948,6 +3037,26 @@ bool CommonHostInterface::SaveInputProfile(const char* profile_path)
       const std::string value = m_settings_interface->GetStringValue(section_name, ssi.key, "");
       if (!value.empty())
         profile.SetStringValue(section_name, ssi.key, value.c_str());
+    }
+
+    for (u32 autofire_index = 0; autofire_index < NUM_CONTROLLER_AUTOFIRE_BUTTONS; autofire_index++)
+    {
+      const auto button_key_name = TinyString::FromFormat("AutoFire%uButton", autofire_index + 1);
+      const std::string button_name(m_settings_interface->GetStringValue(section_name, button_key_name, ""));
+      if (button_name.empty())
+        continue;
+
+      profile.SetStringValue(section_name, button_key_name, button_name.c_str());
+
+      const auto binding_key_name = TinyString::FromFormat("AutoFire%u", autofire_index + 1);
+      const std::vector<std::string> bindings = m_settings_interface->GetStringList(section_name, binding_key_name);
+      for (const std::string& binding : bindings)
+        profile.AddToStringList(section_name, binding_key_name, binding.c_str());
+
+      const auto frequency_key_name = TinyString::FromFormat("AutoFire%uFrequency", autofire_index + 1);
+      const int frequency =
+        m_settings_interface->GetIntValue(section_name, frequency_key_name, DEFAULT_AUTOFIRE_FREQUENCY);
+      profile.SetIntValue(section_name, frequency_key_name, frequency);
     }
   }
 
@@ -3215,6 +3324,10 @@ void CommonHostInterface::SetDefaultSettings(SettingsInterface& si)
   si.SetBoolValue("Cheevos", "UseFirstDiscFromPlaylist", true);
   si.DeleteValue("Cheevos", "Username");
   si.DeleteValue("Cheevos", "Token");
+
+#ifdef WITH_RAINTEGRATION
+  si.SetBoolValue("Cheevos", "UseRAIntegration", false);
+#endif
 #endif
 }
 
@@ -3459,6 +3572,16 @@ std::vector<std::string> CommonHostInterface::GetSettingStringList(const char* s
 {
   std::lock_guard<std::recursive_mutex> guard(m_settings_mutex);
   return m_settings_interface->GetStringList(section, key);
+}
+
+SettingsInterface* CommonHostInterface::GetSettingsInterface()
+{
+  return m_settings_interface.get();
+}
+
+std::lock_guard<std::recursive_mutex> CommonHostInterface::GetSettingsLock()
+{
+  return std::lock_guard<std::recursive_mutex>(m_settings_mutex);
 }
 
 void CommonHostInterface::SetTimerResolutionIncreased(bool enabled)
@@ -3965,14 +4088,14 @@ void CommonHostInterface::TogglePostProcessing()
   g_settings.display_post_processing = !g_settings.display_post_processing;
   if (g_settings.display_post_processing)
   {
-    AddOSDMessage(TranslateStdString("OSDMessage", "Post-processing is now enabled."), 10.0f);
+    AddKeyedOSDMessage("PostProcessing", TranslateStdString("OSDMessage", "Post-processing is now enabled."), 10.0f);
 
     if (!m_display->SetPostProcessingChain(g_settings.display_post_process_chain))
       AddOSDMessage(TranslateStdString("OSDMessage", "Failed to load post processing shader chain."), 20.0f);
   }
   else
   {
-    AddOSDMessage(TranslateStdString("OSDMessage", "Post-processing is now disabled."), 10.0f);
+    AddKeyedOSDMessage("PostProcessing", TranslateStdString("OSDMessage", "Post-processing is now disabled."), 10.0f);
     m_display->SetPostProcessingChain({});
   }
 }
@@ -4021,15 +4144,17 @@ void CommonHostInterface::ToggleWidescreen()
 
   if (g_settings.gpu_widescreen_hack)
   {
-    AddFormattedOSDMessage(
-      5.0f, TranslateString("OSDMessage", "Widescreen hack is now enabled, and aspect ratio is set to %s."),
+    AddKeyedFormattedOSDMessage(
+      "WidescreenHack", 5.0f,
+      TranslateString("OSDMessage", "Widescreen hack is now enabled, and aspect ratio is set to %s."),
       TranslateString("DisplayAspectRatio", Settings::GetDisplayAspectRatioName(g_settings.display_aspect_ratio))
         .GetCharArray());
   }
   else
   {
-    AddFormattedOSDMessage(
-      5.0f, TranslateString("OSDMessage", "Widescreen hack is now disabled, and aspect ratio is set to %s."),
+    AddKeyedFormattedOSDMessage(
+      "WidescreenHack", 5.0f,
+      TranslateString("OSDMessage", "Widescreen hack is now disabled, and aspect ratio is set to %s."),
       TranslateString("DisplayAspectRatio", Settings::GetDisplayAspectRatioName(g_settings.display_aspect_ratio))
         .GetCharArray());
   }
@@ -4294,6 +4419,11 @@ void CommonHostInterface::UpdateCheevosActive()
   const bool cheevos_use_first_disc_from_playlist = GetBoolSettingValue("Cheevos", "UseFirstDiscFromPlaylist", true);
   const bool cheevos_rich_presence = GetBoolSettingValue("Cheevos", "RichPresence", true);
   const bool cheevos_hardcore = GetBoolSettingValue("Cheevos", "ChallengeMode", false);
+
+#ifdef WITH_RAINTEGRATION
+  if (Cheevos::IsUsingRAIntegration())
+    return;
+#endif
 
   if (cheevos_enabled != Cheevos::IsActive() || cheevos_test_mode != Cheevos::IsTestModeActive() ||
       cheevos_unofficial_test_mode != Cheevos::IsUnofficialTestModeActive() ||

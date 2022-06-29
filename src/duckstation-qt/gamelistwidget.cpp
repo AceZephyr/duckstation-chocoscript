@@ -24,8 +24,7 @@ public:
 
   bool lessThan(const QModelIndex& source_left, const QModelIndex& source_right) const override
   {
-    const bool ascending = sortOrder() == Qt::AscendingOrder;
-    return m_model->lessThan(source_left, source_right, source_left.column(), ascending);
+    return m_model->lessThan(source_left, source_right, source_left.column());
   }
 
 private:
@@ -279,7 +278,7 @@ void GameListWidget::resizeEvent(QResizeEvent* event)
 void GameListWidget::resizeTableViewColumnsToFit()
 {
   QtUtils::ResizeColumnsForTableView(m_table_view, {
-                                                     32,  // type
+                                                     45,  // type
                                                      80,  // code
                                                      -1,  // title
                                                      -1,  // file title

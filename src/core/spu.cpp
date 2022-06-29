@@ -7,11 +7,9 @@
 #include "common/wav_writer.h"
 #include "dma.h"
 #include "host_interface.h"
+#include "imgui.h"
 #include "interrupt_controller.h"
 #include "system.h"
-#ifdef WITH_IMGUI
-#include "imgui.h"
-#endif
 Log_SetChannel(SPU);
 
 SPU g_spu;
@@ -300,7 +298,7 @@ u16 SPU::ReadRegister(u32 offset)
           return m_voices[voice_index].right_volume.current_level;
       }
 
-      Log_ErrorPrintf("Unknown SPU register read: offset 0x%X (address 0x%08X)", offset, offset | SPU_BASE);
+      Log_DevPrintf("Unknown SPU register read: offset 0x%X (address 0x%08X)", offset, offset | SPU_BASE);
       return UINT16_C(0xFFFF);
     }
   }
@@ -584,8 +582,8 @@ void SPU::WriteRegister(u32 offset, u16 value)
         return;
       }
 
-      Log_ErrorPrintf("Unknown SPU register write: offset 0x%X (address 0x%08X) value 0x%04X", offset,
-                      offset | SPU_BASE, ZeroExtend32(value));
+      Log_DevPrintf("Unknown SPU register write: offset 0x%X (address 0x%08X) value 0x%04X", offset, offset | SPU_BASE,
+                    ZeroExtend32(value));
       return;
     }
   }
@@ -1921,7 +1919,6 @@ void SPU::UpdateEventInterval()
 
 void SPU::DrawDebugStateWindow()
 {
-#ifdef WITH_IMGUI
   static const ImVec4 active_color{1.0f, 1.0f, 1.0f, 1.0f};
   static const ImVec4 inactive_color{0.4f, 0.4f, 0.4f, 1.0f};
   const float framebuffer_scale = ImGui::GetIO().DisplayFramebufferScale.x;
@@ -2102,5 +2099,4 @@ void SPU::DrawDebugStateWindow()
   }
 
   ImGui::End();
-#endif
 }

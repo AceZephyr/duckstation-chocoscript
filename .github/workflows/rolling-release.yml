@@ -20,7 +20,7 @@ on:
 
 jobs:
   windows-build:
-    runs-on: windows-2019
+    runs-on: windows-2022
     steps:
     - uses: actions/checkout@v2.3.1
       with:
@@ -46,10 +46,19 @@ jobs:
         echo #define SCM_RELEASE_TAGS {"latest", "preview"} >> src/scmversion/tag.h
         echo #define SCM_RELEASE_TAG "latest" >> src/scmversion/tag.h
 
+    - name: Update RC version fields
+      shell: cmd
+      run: |
+        cd src\scmversion
+        call update_rc_version.bat
+        cd ..\..
+        git update-index --assume-unchanged src/duckstation-qt/duckstation-qt.rc
+        git update-index --assume-unchanged src/duckstation-nogui/duckstation-nogui.rc
+
     - name: Compile x64 release build
       shell: cmd
       run: |
-        call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
         msbuild duckstation.sln -t:Build -p:Platform=x64;Configuration=ReleaseLTCG
 
     - name: Create x64 symbols archive
@@ -82,7 +91,7 @@ jobs:
 
 
   windows-arm64-build:
-    runs-on: windows-2019
+    runs-on: windows-2022
     steps:
     - uses: actions/checkout@v2.3.1
       with:
@@ -108,11 +117,19 @@ jobs:
         echo #define SCM_RELEASE_TAGS {"latest", "preview"} >> src/scmversion/tag.h
         echo #define SCM_RELEASE_TAG "latest" >> src/scmversion/tag.h
 
+    - name: Update RC version fields
+      shell: cmd
+      run: |
+        cd src\scmversion
+        call update_rc_version.bat
+        cd ..\..
+        git update-index --assume-unchanged src/duckstation-qt/duckstation-qt.rc
+        git update-index --assume-unchanged src/duckstation-nogui/duckstation-nogui.rc
 
     - name: Compile arm64 release build
       shell: cmd
       run: |
-        call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" amd64_arm64
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" amd64_arm64
         msbuild duckstation.sln -t:Build -p:Platform=ARM64;Configuration=ReleaseLTCG
 
     - name: Create arm64 symbols archive
@@ -131,7 +148,7 @@ jobs:
       run: |
         del /Q bin\ARM64\*.pdb bin\ARM64\*.exp bin\ARM64\*.lib bin\ARM64\*.iobj bin\ARM64\*.ipdb bin\ARM64\common-tests*
         rename bin\ARM64\updater-ARM64-ReleaseLTCG.exe updater.exe
-                
+
     - name: Create arm64 release archive
       shell: cmd
       run: |
@@ -145,7 +162,7 @@ jobs:
 
 
   windows-uwp-build:
-    runs-on: windows-2019
+    runs-on: windows-2022
     steps:
     - uses: actions/checkout@v2.3.1
       with:
@@ -185,6 +202,12 @@ jobs:
       run: |
         copy ${{ steps.write_signing_key.outputs.filePath }} src\duckstation-uwp\duckstation-uwp.pfx
 
+    - name: Disable AppX signing
+      if: github.ref != 'refs/heads/master' && github.ref != 'refs/heads/dev'
+      shell: powershell
+      run: |
+        (gc .\src\duckstation-uwp\duckstation-uwp.vcxproj) -replace '<AppxPackageSigningEnabled>True</AppxPackageSigningEnabled>', '<AppxPackageSigningEnabled>False</AppxPackageSigningEnabled>' | Out-File -encoding ASCII .\src\duckstation-uwp\duckstation-uwp.vcxproj
+
     - name: Restore nuget packages
       shell: cmd
       run: |
@@ -194,18 +217,17 @@ jobs:
       if: github.ref != 'refs/heads/master' && github.ref != 'refs/heads/dev'
       shell: cmd
       run: |
-        call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
         msbuild duckstation-uwp.sln /p:Configuration="ReleaseUWP" /p:Platform="x64" /t:Build
 
     - name: Compile x64 release build with bundle
       if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev'
       shell: cmd
       run: |
-        call "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
+        call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvarsall.bat" x64
         msbuild duckstation-uwp.sln /p:AppxBundle=Always /p:AppxPackageIsForStore=true /p:BuildAppxUploadPackageForUap=true /p:AppxBundlePlatforms="x64" /p:Configuration="ReleaseUWP" /p:Platform="x64" /t:Build
 
     - name: Grab AppX package
-      if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev'
       shell: cmd
       run: |
         copy build\ReleaseUWP-x64\duckstation-uwp\duckstation-uwp_1.0.0.0_Bundle\duckstation-uwp_1.0.0.0_x64_ReleaseUWP.appx duckstation-uwp.appx
@@ -217,7 +239,6 @@ jobs:
         Get-PfxCertificate -FilePath .\src\duckstation-uwp\duckstation-uwp.pfx | Export-Certificate -FilePath duckstation-uwp.der -Type CERT
 
     - name: Upload AppX package
-      if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/dev'
       uses: actions/upload-artifact@v1
       with:
         name: "windows-uwp"
@@ -250,7 +271,7 @@ jobs:
         mkdir build
         cd build
         cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_NOGUI_FRONTEND=ON -DBUILD_QT_FRONTEND=ON -DUSE_DRMKMS=ON -DUSE_EGL=ON -DUSE_SDL2=ON -DUSE_WAYLAND=ON -DUSE_X11=ON -G Ninja ..
-        ninja
+        cmake --build . --parallel
         ../scripts/generate_appimages.sh $(pwd)
 
     - name: Upload NoGUI AppImage
@@ -288,7 +309,7 @@ jobs:
     - name: Install packages
       shell: bash
       run: |
-        brew install qt5 sdl2 curl
+        brew install qt5 sdl2 curl ninja
 
     - name: Clone mac externals
       shell: bash
@@ -301,8 +322,8 @@ jobs:
         mkdir build
         cd build
         export MACOSX_DEPLOYMENT_TARGET=10.14
-        cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_NOGUI_FRONTEND=OFF -DBUILD_QT_FRONTEND=ON -DUSE_SDL2=ON -DQt5_DIR=/usr/local/opt/qt@5/lib/cmake/Qt5 ..
-        cmake --build . --parallel 2
+        cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_NOGUI_FRONTEND=OFF -DBUILD_QT_FRONTEND=ON -DUSE_SDL2=ON -DQt5_DIR=/usr/local/opt/qt@5/lib/cmake/Qt5 -G Ninja ..
+        cmake --build . --parallel
         cd bin
         zip -r duckstation-mac-release.zip DuckStation.app/
 
@@ -352,7 +373,7 @@ jobs:
         uses: actions/download-artifact@v1
         with:
           name: "linux-x64-appimage-qt-zsync"
-          
+
       - name: Create preview release
         if: github.ref == 'refs/heads/master'
         uses: "marvinpinto/action-automatic-releases@latest"
@@ -372,7 +393,7 @@ jobs:
             linux-x64-appimage-nogui-zsync/duckstation-nogui-x64.AppImage.zsync
             linux-x64-appimage-qt/duckstation-qt-x64.AppImage
             linux-x64-appimage-qt-zsync/duckstation-qt-x64.AppImage.zsync
-          
+
       - name: Create dev release
         if: github.ref == 'refs/heads/dev'
         uses: "marvinpinto/action-automatic-releases@latest"
@@ -392,4 +413,3 @@ jobs:
             linux-x64-appimage-nogui-zsync/duckstation-nogui-x64.AppImage.zsync
             linux-x64-appimage-qt/duckstation-qt-x64.AppImage
             linux-x64-appimage-qt-zsync/duckstation-qt-x64.AppImage.zsync
-             

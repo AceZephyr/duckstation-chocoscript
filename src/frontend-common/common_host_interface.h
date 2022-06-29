@@ -134,11 +134,8 @@ public:
   virtual void DestroySystem() override;
 
   /// Returns the settings interface.
-  ALWAYS_INLINE SettingsInterface* GetSettingsInterface() const { return m_settings_interface.get(); }
-  ALWAYS_INLINE std::lock_guard<std::recursive_mutex> GetSettingsLock()
-  {
-    return std::lock_guard<std::recursive_mutex>(m_settings_mutex);
-  }
+  SettingsInterface* GetSettingsInterface() override;
+  std::lock_guard<std::recursive_mutex> GetSettingsLock() override;
 
   /// Returns the game list.
   ALWAYS_INLINE GameList* GetGameList() const { return m_game_list.get(); }
@@ -223,6 +220,8 @@ public:
 
   /// Adds OSD messages, duration is in seconds.
   void AddOSDMessage(std::string message, float duration = 2.0f) override;
+  void AddKeyedOSDMessage(std::string key, std::string message, float duration = 2.0f) override;
+  void RemoveKeyedOSDMessage(std::string key) override;
   void ClearOSDMessages();
 
   /// async message queue bookeeping for. Should be called on UI thread.
@@ -313,7 +312,7 @@ public:
                                   struct ScriptFileNames* script_fns);
 
   /// Called when achievements data is loaded.
-  virtual void OnAchievementsRefreshed();
+  virtual void OnAchievementsRefreshed() override;
 
   /// Opens a file in the DuckStation "package".
   /// This is the APK for Android builds, or the program directory for standalone builds.
@@ -356,6 +355,7 @@ protected:
 
   struct OSDMessage
   {
+    std::string key;
     std::string text;
     Common::Timer time;
     float duration;

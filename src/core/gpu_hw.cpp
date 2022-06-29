@@ -5,15 +5,13 @@
 #include "common/state_wrapper.h"
 #include "cpu_core.h"
 #include "gpu_sw_backend.h"
+#include "imgui.h"
 #include "pgxp.h"
 #include "settings.h"
 #include "system.h"
 #include <cmath>
 #include <sstream>
 #include <tuple>
-#ifdef WITH_IMGUI
-#include "imgui.h"
-#endif
 Log_SetChannel(GPU_HW);
 
 template<typename T>
@@ -151,8 +149,9 @@ void GPU_HW::UpdateHWSettings(bool* framebuffer_changed, bool* shaders_changed)
 
   if (m_resolution_scale != resolution_scale)
   {
-    g_host_interface->AddFormattedOSDMessage(
-      10.0f, g_host_interface->TranslateString("OSDMessage", "Resolution scale set to %ux (display %ux%u, VRAM %ux%u)"),
+    g_host_interface->AddKeyedFormattedOSDMessage(
+      "ResolutionScale", 10.0f,
+      g_host_interface->TranslateString("OSDMessage", "Resolution scale set to %ux (display %ux%u, VRAM %ux%u)"),
       resolution_scale, m_crtc_state.display_vram_width * resolution_scale,
       resolution_scale * m_crtc_state.display_vram_height, VRAM_WIDTH * resolution_scale,
       VRAM_HEIGHT * resolution_scale);
@@ -162,14 +161,15 @@ void GPU_HW::UpdateHWSettings(bool* framebuffer_changed, bool* shaders_changed)
   {
     if (per_sample_shading)
     {
-      g_host_interface->AddFormattedOSDMessage(
-        10.0f, g_host_interface->TranslateString("OSDMessage", "Multisample anti-aliasing set to %ux (SSAA)."),
-        multisamples);
+      g_host_interface->AddKeyedFormattedOSDMessage(
+        "Multisampling", 10.0f,
+        g_host_interface->TranslateString("OSDMessage", "Multisample anti-aliasing set to %ux (SSAA)."), multisamples);
     }
     else
     {
-      g_host_interface->AddFormattedOSDMessage(
-        10.0f, g_host_interface->TranslateString("OSDMessage", "Multisample anti-aliasing set to %ux."), multisamples);
+      g_host_interface->AddKeyedFormattedOSDMessage(
+        "Multisampling", 10.0f,
+        g_host_interface->TranslateString("OSDMessage", "Multisample anti-aliasing set to %ux."), multisamples);
     }
   }
 
@@ -1403,7 +1403,6 @@ void GPU_HW::DrawRendererStats(bool is_idle_frame)
     m_renderer_stats = {};
   }
 
-#ifdef WITH_IMGUI
   if (ImGui::CollapsingHeader("Renderer Statistics", ImGuiTreeNodeFlags_DefaultOpen))
   {
     static const ImVec4 active_color{1.0f, 1.0f, 1.0f, 1.0f};
@@ -1472,7 +1471,6 @@ void GPU_HW::DrawRendererStats(bool is_idle_frame)
 
     ImGui::Columns(1);
   }
-#endif
 }
 
 GPU_HW::ShaderCompileProgressTracker::ShaderCompileProgressTracker(std::string title, u32 total)

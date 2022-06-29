@@ -20,6 +20,11 @@
 #include "scmversion/scmversion.h"
 #include "settingsdialog.h"
 #include "settingwidgetbinder.h"
+
+#ifdef WITH_CHEEVOS
+#include "core/cheevos.h"
+#endif
+
 #include <QtCore/QDebug>
 #include <QtCore/QFile>
 #include <QtCore/QFileInfo>
@@ -101,6 +106,11 @@ void MainWindow::initializeAndShow()
   switchToGameListView();
 
   show();
+
+#ifdef WITH_RAINTEGRATION
+  if (Cheevos::IsUsingRAIntegration())
+    Cheevos::RAIntegration::MainWindowChanged((void*)winId());
+#endif
 }
 
 void MainWindow::reportError(const QString& message)
@@ -964,7 +974,17 @@ void MainWindow::setupAdditionalUi()
     QAction* action = language_group->addAction(it.first);
     action->setCheckable(true);
     action->setChecked(current_language == it.second);
-    action->setIcon(QIcon(QStringLiteral(":/icons/flags/%1.png").arg(it.second)));
+
+    QString icon_filename(QStringLiteral(":/icons/flags/%1.png").arg(it.second));
+    if (!QFile::exists(icon_filename))
+    {
+      // try without the suffix (e.g. es-es -> es)
+      const int pos = it.second.lastIndexOf('-');
+      if (pos >= 0)
+        icon_filename = QStringLiteral(":/icons/flags/%1.png").arg(it.second.left(pos));
+    }
+    action->setIcon(QIcon(icon_filename));
+
     m_ui.menuSettingsLanguage->addAction(action);
     action->setData(it.second);
     connect(action, &QAction::triggered, [this, action]() {
@@ -981,6 +1001,33 @@ void MainWindow::setupAdditionalUi()
     connect(action, &QAction::triggered,
             [scale]() { QtHostInterface::GetInstance()->requestRenderWindowScale(scale); });
   }
+
+#ifdef WITH_RAINTEGRATION
+  if (Cheevos::IsUsingRAIntegration())
+  {
+    QMenu* raMenu = new QMenu(QStringLiteral("RAIntegration"), m_ui.menuDebug);
+    connect(raMenu, &QMenu::aboutToShow, this, [this, raMenu]() {
+      raMenu->clear();
+
+      const auto items = Cheevos::RAIntegration::GetMenuItems();
+      for (const auto& [id, title] : items)
+      {
+        if (id == 0)
+        {
+          raMenu->addSeparator();
+          continue;
+        }
+
+        QAction* raAction = raMenu->addAction(QString::fromUtf8(title));
+        connect(raAction, &QAction::triggered, this, [id]() {
+          QtHostInterface::GetInstance()->executeOnEmulationThread(
+            [id]() { Cheevos::RAIntegration::ActivateMenuItem(id); });
+        });
+      }
+    });
+    m_ui.menuDebug->insertMenu(m_ui.menuCPUExecutionMode->menuAction(), raMenu);
+  }
+#endif
 }
 
 void MainWindow::updateEmulationActions(bool starting, bool running, bool cheevos_challenge_mode)

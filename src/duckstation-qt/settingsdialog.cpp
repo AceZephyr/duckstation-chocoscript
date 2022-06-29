@@ -18,6 +18,7 @@
 
 #ifdef WITH_CHEEVOS
 #include "achievementsettingswidget.h"
+#include "core/cheevos.h"
 #endif
 
 static constexpr char DEFAULT_SETTING_HELP_TEXT[] = "";
@@ -45,7 +46,8 @@ SettingsDialog::SettingsDialog(QtHostInterface* host_interface, QWidget* parent 
   m_advanced_settings = new AdvancedSettingsWidget(host_interface, m_ui.settingsContainer, this);
 
 #ifdef WITH_CHEEVOS
-  m_achievement_settings = new AchievementSettingsWidget(host_interface, m_ui.settingsContainer, this);
+  if (!Cheevos::IsUsingRAIntegration())
+    m_achievement_settings = new AchievementSettingsWidget(host_interface, m_ui.settingsContainer, this);
 #endif
 
   m_ui.settingsContainer->insertWidget(static_cast<int>(Category::GeneralSettings), m_general_settings);
@@ -62,7 +64,18 @@ SettingsDialog::SettingsDialog(QtHostInterface* host_interface, QWidget* parent 
   m_ui.settingsContainer->insertWidget(static_cast<int>(Category::AudioSettings), m_audio_settings);
 
 #ifdef WITH_CHEEVOS
-  m_ui.settingsContainer->insertWidget(static_cast<int>(Category::AchievementSettings), m_achievement_settings);
+  if (Cheevos::IsUsingRAIntegration())
+  {
+    QLabel* placeholder_label =
+      new QLabel(QStringLiteral("RAIntegration is being used, built-in RetroAchievements support is disabled."),
+                 m_ui.settingsContainer);
+    placeholder_label->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    m_ui.settingsContainer->insertWidget(static_cast<int>(Category::AchievementSettings), placeholder_label);
+  }
+  else
+  {
+    m_ui.settingsContainer->insertWidget(static_cast<int>(Category::AchievementSettings), m_achievement_settings);
+  }
 #else
   QLabel* placeholder_label =
     new QLabel(tr("This DuckStation build was not compiled with RetroAchievements support."), m_ui.settingsContainer);
@@ -76,8 +89,13 @@ SettingsDialog::SettingsDialog(QtHostInterface* host_interface, QWidget* parent 
   m_ui.settingsContainer->setCurrentIndex(0);
   m_ui.helpText->setText(m_category_help_text[0]);
   connect(m_ui.settingsCategory, &QListWidget::currentRowChanged, this, &SettingsDialog::onCategoryCurrentRowChanged);
-  connect(m_ui.closeButton, &QPushButton::clicked, this, &SettingsDialog::accept);
-  connect(m_ui.restoreDefaultsButton, &QPushButton::clicked, this, &SettingsDialog::onRestoreDefaultsClicked);
+  connect(m_ui.buttonBox, &QDialogButtonBox::rejected, this, &SettingsDialog::accept);
+  connect(m_ui.buttonBox, &QDialogButtonBox::clicked, this, [this](QAbstractButton* button) {
+    if (m_ui.buttonBox->buttonRole(button) == QDialogButtonBox::ResetRole)
+    {
+      onRestoreDefaultsClicked();
+    }
+  });
 
   connect(m_console_settings, &ConsoleSettingsWidget::multitapModeChanged, m_controller_settings,
           &ControllerSettingsWidget::updateMultitapControllerTitles);

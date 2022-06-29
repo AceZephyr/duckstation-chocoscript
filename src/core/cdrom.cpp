@@ -5,14 +5,12 @@
 #include "common/platform.h"
 #include "common/state_wrapper.h"
 #include "dma.h"
+#include "imgui.h"
 #include "interrupt_controller.h"
 #include "settings.h"
 #include "spu.h"
 #include "system.h"
 #include <cmath>
-#ifdef WITH_IMGUI
-#include "imgui.h"
-#endif
 Log_SetChannel(CDROM);
 
 #if defined(CPU_X64)
@@ -1064,7 +1062,7 @@ void CDROM::ExecuteCommand(TickCount ticks_late)
             ClearDriveState();
           }
         }
-        else if (m_drive_state != DriveState::SeekingImplicit)
+        else if (m_drive_state != DriveState::SeekingImplicit && m_drive_state != DriveState::ShellOpening)
         {
           // if we're seeking or reading, we need to add time to the current seek/read
           const TickCount change_ticks = GetTicksForSpeedChange();
@@ -1913,7 +1911,18 @@ void CDROM::UpdatePhysicalPosition(bool update_logical)
   const u32 ticks = TimingEvents::GetGlobalTickCounter();
   if (IsSeeking() || IsReadingOrPlaying() || !m_secondary_status.motor_on)
   {
-    // set by the event
+    // If we're seeking+reading the first sector (no stat bits set), we need to return the set/current lba, not the last
+    // physical LBA. Failing to do so may result in a track-jumped position getting returned in GetlocP, which causes
+    // Mad Panic Coaster to go into a seek+play loop.
+    if ((m_secondary_status.bits & (STAT_READING | STAT_PLAYING_CDDA | STAT_MOTOR_ON)) == STAT_MOTOR_ON &&
+        m_current_lba != m_physical_lba)
+    {
+      Log_WarningPrintf("Jumping to hold position [%u->%u] while %s first sector", m_physical_lba, m_current_lba,
+                        (m_drive_state == DriveState::Reading) ? "reading" : "playing");
+      SetHoldPosition(m_current_lba, true);
+    }
+
+    // Otherwise, this gets updated by the read event.
     return;
   }
 
@@ -2711,7 +2720,6 @@ void CDROM::ClearSectorBuffers()
 
 void CDROM::DrawDebugWindow()
 {
-#ifdef WITH_IMGUI
   static const ImVec4 active_color{1.0f, 1.0f, 1.0f, 1.0f};
   static const ImVec4 inactive_color{0.4f, 0.4f, 0.4f, 1.0f};
   const float framebuffer_scale = ImGui::GetIO().DisplayFramebufferScale.x;
@@ -2908,5 +2916,4 @@ void CDROM::DrawDebugWindow()
   }
 
   ImGui::End();
-#endif
 }
