@@ -729,7 +729,6 @@ bool ShouldCheckForImagePatches()
   return g_host_interface->GetBoolSettingValue("CDROM", "LoadImagePatches", false);
 }
 
-
 bool Boot(const SystemBootParameters& params)
 {
 
@@ -1522,7 +1521,7 @@ void DoRunFrame()
   }
 
   // Generate any pending samples from the SPU before sleeping, this way we reduce the chances of underruns.
-  g_spu.Generate4PendingSamples();
+  g_spu.GeneratePendingSamples();
 
   if (s_cheat_list)
     s_cheat_list->Apply();
@@ -1530,12 +1529,78 @@ void DoRunFrame()
   g_gpu->ResetGraphicsAPIState();
 }
 
-#define TEST_FRAMES_NO_INPUT 0
-#define TEST_FRAMES_ALL_INPUTS_FOR_PRIZE 1
+// BEGIN CHOCODUCK
 
-#define SCRIPT_MODE TEST_FRAMES_NO_INPUT
+void set_controller_inputs(int buttons)
+{
+  for (int i = 0; i < 16; i++)
+  {
+    GetController(0)->SetButtonState(i, (buttons & (1 << i)) != 0);
+  }
+}
 
-#define FRAME_DATA_BUFFER_SIZE 1 << 17
+#define B_SELECT 1 << 0
+#define B_L3 1 << 1
+#define B_R3 1 << 2
+#define B_START 1 << 3
+#define B_UP 1 << 4
+#define B_RIGHT 1 << 5
+#define B_DOWN 1 << 6
+#define B_LEFT 1 << 7
+#define B_L2 1 << 8
+#define B_R2 1 << 9
+#define B_L1 1 << 10
+#define B_R1 1 << 11
+#define B_TRIANGLE 1 << 12
+#define B_CIRCLE 1 << 13
+#define B_CROSS 1 << 14
+#define B_SQUARE 1 << 15
+#define MANUAL 1 << 16
+
+const char* BUTTON_NAMES[]{"Select", "L3", "R3", "Start",    "Up",     "Right", "Down",   "Left",  "L2",
+                           "R2",     "L1", "R1", "Triangle", "Circle", "Cross", "Square", "Manual"};
+
+const int BUTTON_COMBOS[]{0,
+                          MANUAL,
+                          MANUAL | B_UP,
+                          MANUAL | B_DOWN,
+                          MANUAL | B_LEFT,
+                          MANUAL | B_RIGHT,
+                          MANUAL | B_UP | B_LEFT,
+                          MANUAL | B_DOWN | B_LEFT,
+                          MANUAL | B_UP | B_RIGHT,
+                          MANUAL | B_DOWN | B_RIGHT,
+                          MANUAL | B_SQUARE,
+                          MANUAL | B_SQUARE | B_UP,
+                          MANUAL | B_SQUARE | B_DOWN,
+                          MANUAL | B_SQUARE | B_LEFT,
+                          MANUAL | B_SQUARE | B_RIGHT,
+                          MANUAL | B_SQUARE | B_UP | B_LEFT,
+                          MANUAL | B_SQUARE | B_DOWN | B_LEFT,
+                          MANUAL | B_SQUARE | B_UP | B_RIGHT,
+                          MANUAL | B_SQUARE | B_DOWN | B_RIGHT,
+                          MANUAL | B_CIRCLE,
+                          MANUAL | B_CIRCLE | B_UP,
+                          MANUAL | B_CIRCLE | B_DOWN,
+                          MANUAL | B_CIRCLE | B_LEFT,
+                          MANUAL | B_CIRCLE | B_RIGHT,
+                          MANUAL | B_CIRCLE | B_UP | B_LEFT,
+                          MANUAL | B_CIRCLE | B_DOWN | B_LEFT,
+                          MANUAL | B_CIRCLE | B_UP | B_RIGHT,
+                          MANUAL | B_CIRCLE | B_DOWN | B_RIGHT,
+                          MANUAL | B_R1 | B_R2,
+                          MANUAL | B_R1 | B_R2 | B_UP,
+                          MANUAL | B_R1 | B_R2 | B_DOWN,
+                          MANUAL | B_R1 | B_R2 | B_LEFT,
+                          MANUAL | B_R1 | B_R2 | B_RIGHT,
+                          MANUAL | B_R1 | B_R2 | B_UP | B_LEFT,
+                          MANUAL | B_R1 | B_R2 | B_DOWN | B_LEFT,
+                          MANUAL | B_R1 | B_R2 | B_UP | B_RIGHT,
+                          MANUAL | B_R1 | B_R2 | B_DOWN | B_RIGHT};
+
+const int BUTTON_NAMES_LEN = sizeof(BUTTON_NAMES) / sizeof(BUTTON_NAMES[0]);
+const int BUTTON_COMBOS_LEN = sizeof(BUTTON_COMBOS) / sizeof(BUTTON_COMBOS[0]);
+const int NUMBER_OF_PRIZES = 24;
 
 #define STATE_WAITING_FOR_RACE_MODE 0
 #define STATE_WAITING_FOR_A_BIT_AFTER_RACE_MODE_ENTER 1
@@ -1551,27 +1616,15 @@ struct ChocoData
   int dash_speed;
   int stamina;
   int ai_type;
-  // int name_index;
-};
-
-struct FrameData
-{
-  int frame;
-  int prize_pool[3];
-  int tiles[15];
-  int my_ai_type;
-  struct ChocoData choco_data[5];
 };
 
 struct StateMachine
 {
-  //struct FrameData frame_data[FRAME_DATA_BUFFER_SIZE];
-  struct FrameData current_frame_data;
   long int chars_read_total;
-  //int frame_data_length;
+  unsigned int frame;
   int state;
   int current_frame_index;
-  int current_inputs;
+  int current_inputs_index;
   int timer;
 };
 
@@ -1584,37 +1637,30 @@ std::string script_out_filename;
 std::string script_err_filename;
 std::string script_savestate_filename;
 
-void read_next_frame() {
+int read_next_frame()
+{
   int ret;
-  struct FrameData* d = &state_machine.current_frame_data;
   int chars_read_this_line = 0;
   in = fopen(script_in_filename.c_str(), "r");
   ret = fseek(in, state_machine.chars_read_total, SEEK_SET);
-  ret = fscanf(
-    in,
-    "%d|%d,%d,%d|%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d|%d,%d,%d,%d;%d,%d,%d,%d;%d,%d,%d,%d;%d,%d,%d,%d;%d,%d,%"
-    "d,%d|%d\n%n",
-    &d->frame, &d->prize_pool[0], &d->prize_pool[1], &d->prize_pool[2], &d->tiles[0], &d->tiles[1], &d->tiles[2],
-    &d->tiles[3], &d->tiles[4], &d->tiles[5], &d->tiles[6], &d->tiles[7], &d->tiles[8], &d->tiles[9], &d->tiles[10],
-    &d->tiles[11], &d->tiles[12], &d->tiles[13], &d->tiles[14], &d->choco_data[0].speed, &d->choco_data[0].dash_speed,
-    &d->choco_data[0].stamina, &d->choco_data[0].ai_type, &d->choco_data[1].speed, &d->choco_data[1].dash_speed,
-    &d->choco_data[1].stamina, &d->choco_data[1].ai_type, &d->choco_data[2].speed, &d->choco_data[2].dash_speed,
-    &d->choco_data[2].stamina, &d->choco_data[2].ai_type, &d->choco_data[3].speed, &d->choco_data[3].dash_speed,
-    &d->choco_data[3].stamina, &d->choco_data[3].ai_type, &d->choco_data[4].speed, &d->choco_data[4].dash_speed,
-    &d->choco_data[4].stamina, &d->choco_data[4].ai_type, &d->my_ai_type, &chars_read_this_line);
+  ret = fscanf(in, "%d\r\n%n", &state_machine.frame, &chars_read_this_line);
   if (ret == EOF)
   {
-    fprintf(err, "end of file at unexpected point\n");
-    exit(EXIT_FAILURE);
+    fprintf(err, "end of file\n");
+    return 0;
   }
+  state_machine.chars_read_total += chars_read_this_line;
+  return 1;
 }
 
 void init_script()
 {
   script_in_filename = g_host_interface->GetStringSettingValue("script", "in_fn", "in.txt");
-  script_out_filename = g_host_interface->GetStringSettingValue("script", "out_fn", "out.txt");
+  script_out_filename = g_host_interface->GetStringSettingValue("script", "out_fn", "out.json");
   script_err_filename = g_host_interface->GetStringSettingValue("script", "err_fn", "err.txt");
   script_savestate_filename = g_host_interface->GetStringSettingValue("script", "ss_fn", "start_savestate.sav");
+  
+  state_machine.chars_read_total = 0;
 
   in = fopen(script_in_filename.c_str(), "r");
   out = fopen(script_out_filename.c_str(), "w");
@@ -1624,38 +1670,18 @@ void init_script()
     perror("init_script fopen");
     exit(EXIT_FAILURE);
   }
-  state_machine.chars_read_total = 0;
-  state_machine.frame_data_length = 0;
-  while (!feof(in))
-  {
-    struct FrameData* d = &state_machine.frame_data[state_machine.frame_data_length++];
-    int ret = fscanf(
-      in,
-      "%d|%d,%d,%d|%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d|%d,%d,%d,%d;%d,%d,%d,%d;%d,%d,%d,%d;%d,%d,%d,%d;%d,%d,%"
-      "d,%d|%d\n",
-      &d->frame, &d->prize_pool[0], &d->prize_pool[1], &d->prize_pool[2], &d->tiles[0], &d->tiles[1], &d->tiles[2],
-      &d->tiles[3], &d->tiles[4], &d->tiles[5], &d->tiles[6], &d->tiles[7], &d->tiles[8], &d->tiles[9], &d->tiles[10],
-      &d->tiles[11], &d->tiles[12], &d->tiles[13], &d->tiles[14], &d->choco_data[0].speed, &d->choco_data[0].dash_speed,
-      &d->choco_data[0].stamina, &d->choco_data[0].ai_type, &d->choco_data[1].speed, &d->choco_data[1].dash_speed,
-      &d->choco_data[1].stamina, &d->choco_data[1].ai_type, &d->choco_data[2].speed, &d->choco_data[2].dash_speed,
-      &d->choco_data[2].stamina, &d->choco_data[2].ai_type, &d->choco_data[3].speed, &d->choco_data[3].dash_speed,
-      &d->choco_data[3].stamina, &d->choco_data[3].ai_type, &d->choco_data[4].speed, &d->choco_data[4].dash_speed,
-      &d->choco_data[4].stamina, &d->choco_data[4].ai_type, &d->my_ai_type);
-    if (ret == EOF)
-    {
-      fprintf(err, "end of file at unexpected point\n");
-      exit(EXIT_FAILURE);
-    }
-    if (state_machine.frame_data_length >= FRAME_DATA_BUFFER_SIZE)
-    {
-      fprintf(err, "file too big\n");
-      exit(EXIT_FAILURE);
-    }
-  }
-  state_machine.frame_data_length--;
+  fprintf(out, "{\n");
+  fclose(in);
+  fclose(out);
+
+  read_next_frame();
+
+  fclose(err);
+
+
   state_machine.state = STATE_WAITING_FOR_RACE_MODE;
   state_machine.current_frame_index = 0;
-  state_machine.current_inputs = 0;
+  state_machine.current_inputs_index = 0;
   state_machine.timer = 0;
 
   if (!g_host_interface->LoadState(script_savestate_filename.c_str()))
@@ -1665,49 +1691,52 @@ void init_script()
   }
 
   sm_is_init = true;
-  fclose(in);
-  fclose(out);
-  fclose(err);
 }
 
-void next_trial(bool won, int second_player)
+void next_trial(int second_player)
 {
-  if (state_machine.current_inputs >= 16 || won)
+  out = fopen(script_out_filename.c_str(), "a");
+  if (state_machine.current_inputs_index == 0)
   {
-    out = fopen(script_out_filename.c_str(), "a");
-    fprintf(out, "%d,%d,%d\n", state_machine.frame_data[state_machine.current_frame_index].frame,
-            state_machine.current_inputs, second_player);
-    fclose(out);
+    fprintf(out, "%d:{", state_machine.frame);
   }
-  if (state_machine.current_inputs < 16 && !won)
+  fprintf(out, "%d:%d,", BUTTON_COMBOS[state_machine.current_inputs_index], second_player);
+  if (state_machine.current_inputs_index == BUTTON_COMBOS_LEN - 1)
   {
-    state_machine.current_inputs++;
-    state_machine.state = STATE_SET_RNG;
-    LoadMemoryState(choco_savestate);
+    fprintf(out, "},\n");
   }
-  else if (state_machine.current_frame_index < state_machine.frame_data_length)
+  fclose(out);
+
+  if (state_machine.current_inputs_index == BUTTON_COMBOS_LEN - 1)
   {
-      // next frame
-    state_machine.current_inputs = 0;
-    state_machine.current_frame_index++;
-    state_machine.state = STATE_SET_RNG;
-    LoadMemoryState(choco_savestate);
+    if (read_next_frame())
+    {
+      state_machine.current_inputs_index = 0;
+      state_machine.state = STATE_SET_RNG;
+      LoadMemoryState(choco_savestate);
+    }
+    else
+    {
+      state_machine.state = STATE_DONE;
+      fprintf(err, "done!\n");
+      out = fopen(script_out_filename.c_str(), "a");
+      fprintf(out, "}\n");
+      fclose(out);
+      exit(0);
+    }
   }
   else
   {
-    state_machine.state = STATE_DONE;
-    fprintf(err, "done!\n");
-    exit(0);
+    state_machine.current_inputs_index++;
+    state_machine.state = STATE_SET_RNG;
+    LoadMemoryState(choco_savestate);
   }
 }
 
 void run_script()
 {
   // clear controller 1's buttons
-  for (int i = 0; i < 16; i++)
-  {
-    GetController(0)->SetButtonState(i, false);
-  }
+  set_controller_inputs(0);
   if (!sm_is_init)
   {
     init_script();
@@ -1738,17 +1767,17 @@ void run_script()
       }
       break;
     case STATE_SET_RNG:
-      CPU::SafeWriteMemoryWord(0x80009010, state_machine.frame_data[state_machine.current_frame_index].frame);
-      fprintf(err, "RNG: %d %x. Try %d.\n", state_machine.frame_data[state_machine.current_frame_index].frame,
-              state_machine.frame_data[state_machine.current_frame_index].frame, state_machine.current_inputs + 1);
+      CPU::SafeWriteMemoryWord(0x80009010, state_machine.frame);
+      fprintf(err, "RNG: %d %x. Inputs: %x.\n", state_machine.frame, state_machine.frame,
+              BUTTON_COMBOS[state_machine.current_inputs_index]);
       state_machine.state = STATE_HOLDING_START_FOR_PRE_RACE_SCREEN;
       state_machine.timer = 20;
       break;
     case STATE_HOLDING_START_FOR_PRE_RACE_SCREEN:
-      GetController(0)->SetButtonState(3, true);
+      set_controller_inputs(B_START);
       u32 rng;
       CPU::SafeReadMemoryWord(0x80009010, &rng);
-      if (rng != state_machine.frame_data[state_machine.current_frame_index].frame)
+      if (rng != state_machine.frame)
       {
         state_machine.timer--;
         if (state_machine.timer == 0)
@@ -1759,194 +1788,41 @@ void run_script()
       }
       break;
     case STATE_ADVANCING_TO_RACE:
-      if (state_machine.current_inputs > 0)
+      if (BUTTON_COMBOS[state_machine.current_inputs_index] & MANUAL)
       {
-        GetController(0)->SetButtonState(0, true);
+        set_controller_inputs(B_SELECT);
       }
       state_machine.timer--;
       if (state_machine.timer == 0)
       {
-        if (SCRIPT_MODE == TEST_FRAMES_ALL_INPUTS_FOR_PRIZE)
-        {
-          fprintf(err, "Racers that need to win: ");
-        }
-        int idx = 0;
-        for (int i = 0; i < 5; i++)
-        {
-          for (int j = 0; j < 3; j++)
-          {
-            u8 byte;
-            CPU::SafeReadMemoryByte(0x800B7487 + 8 * idx, &byte);
-            if (byte != state_machine.frame_data[state_machine.current_frame_index].tiles[5 * j + i])
-            {
-              fprintf(err, "failed tile check\n");
-              // a somewhat crude way to stop the script but hey it works
-              exit(1);
-            }
-            if (SCRIPT_MODE == TEST_FRAMES_ALL_INPUTS_FOR_PRIZE && j == 0 && byte == 2)
-            {
-              fprintf(err, "%d ", i + 2);
-            }
-            idx++;
-          }
-        }
-        if (SCRIPT_MODE == TEST_FRAMES_ALL_INPUTS_FOR_PRIZE)
-        {
-          fprintf(err, "\n");
-        }
         state_machine.state = STATE_RACING;
       }
       break;
     case STATE_RACING:
+      set_controller_inputs(BUTTON_COMBOS[state_machine.current_inputs_index]);
       u8 byte;
       CPU::SafeReadMemoryByte(0x800B763C, &byte);
-      if (byte == 0)
+      if (byte != 0)
       {
-        switch (state_machine.current_inputs)
+        if (byte != 1)
         {
-          case 0:
-          case 1:
-            break;
-          case 2:
-            GetController(0)->SetButtonState(7, true);
-            break;
-          case 3:
-            GetController(0)->SetButtonState(5, true);
-            break;
-          case 4:
-            GetController(0)->SetButtonState(11, true);
-            GetController(0)->SetButtonState(9, true);
-            break;
-          case 5:
-            GetController(0)->SetButtonState(15, true);
-            break;
-          case 6:
-            GetController(0)->SetButtonState(15, true);
-            GetController(0)->SetButtonState(7, true);
-            break;
-          case 7:
-            GetController(0)->SetButtonState(15, true);
-            GetController(0)->SetButtonState(5, true);
-            break;
-          case 8:
-            GetController(0)->SetButtonState(13, true);
-            break;
-          case 9:
-            GetController(0)->SetButtonState(13, true);
-            GetController(0)->SetButtonState(7, true);
-            break;
-          case 10:
-            GetController(0)->SetButtonState(13, true);
-            GetController(0)->SetButtonState(5, true);
-            break;
-          case 11:
-            GetController(0)->SetButtonState(15, true);
-            GetController(0)->SetButtonState(11, true);
-            GetController(0)->SetButtonState(9, true);
-            break;
-          case 12:
-            GetController(0)->SetButtonState(15, true);
-            GetController(0)->SetButtonState(11, true);
-            GetController(0)->SetButtonState(9, true);
-            GetController(0)->SetButtonState(7, true);
-            break;
-          case 13:
-            GetController(0)->SetButtonState(15, true);
-            GetController(0)->SetButtonState(11, true);
-            GetController(0)->SetButtonState(9, true);
-            GetController(0)->SetButtonState(5, true);
-            break;
-          case 14:
-            GetController(0)->SetButtonState(13, true);
-            GetController(0)->SetButtonState(11, true);
-            GetController(0)->SetButtonState(9, true);
-            break;
-          case 15:
-            GetController(0)->SetButtonState(13, true);
-            GetController(0)->SetButtonState(11, true);
-            GetController(0)->SetButtonState(9, true);
-            GetController(0)->SetButtonState(7, true);
-            break;
-          case 16:
-            GetController(0)->SetButtonState(13, true);
-            GetController(0)->SetButtonState(11, true);
-            GetController(0)->SetButtonState(9, true);
-            GetController(0)->SetButtonState(5, true);
-            break;
-        }
-      }
-      else
-      {
-        if (SCRIPT_MODE == TEST_FRAMES_NO_INPUT)
-        {
-          u32 addr = 0x800B763C;
-          bool x = true;
-          for (; x && addr <= 0x800B7970; addr += 0xA4)
-          {
-            CPU::SafeReadMemoryByte(addr, &byte);
-            if (byte == 0)
-            {
-              x = false;
-            }
-          }
-          if (x)
-          {
-            out = fopen(script_out_filename.c_str(), "a");
-            fprintf(out, "%d", state_machine.frame_data[state_machine.current_frame_index].frame);
-            fprintf(err, "Rankings: ");
-            for (int place = 1; place <= 6; place++)
-            {
-              int racer;
-              for (racer = 1, addr = 0x800B763C; addr <= 0x800B7970; addr += 0xA4, racer++)
-              {
-                CPU::SafeReadMemoryByte(addr, &byte);
-                if (byte == place)
-                {
-                  fprintf(out, ",%u", racer);
-                  fprintf(err, ",%u", racer);
-                }
-              }
-            }
-            fprintf(out, "\n");
-            fprintf(err, "\n");
-            fclose(out);
-            if (state_machine.current_frame_index < state_machine.frame_data_length)
-            {
-              state_machine.current_inputs = 0;
-              state_machine.current_frame_index++;
-              state_machine.state = STATE_SET_RNG;
-              LoadMemoryState(choco_savestate);
-            }
-            else
-            {
-              state_machine.state = STATE_DONE;
-              fprintf(err, "done!\n");
-              exit(0);
-            }
-          }
+          // we did not win
+          fprintf(err, "We did not win.\n");
+          next_trial(-1);
         }
         else
         {
-          if (byte != 1)
+          // we won
+          u32 addr = 0x800B76E0;
+          int racer = 0;
+          for (; addr <= 0x800B7970; addr += 0xA4, racer++)
           {
-            // we did not win
-            fprintf(err, "We did not win\n");
-            next_trial(false, -1);
-          }
-          else
-          {
-            u32 addr = 0x800B76E0;
-            int racer = 0;
-            for (; addr <= 0x800B7970; addr += 0xA4, racer++)
+            CPU::SafeReadMemoryByte(addr, &byte);
+            if (byte == 2)
             {
-              CPU::SafeReadMemoryByte(addr, &byte);
-              if (byte == 2)
-              {
-                // this racer got 2nd place
-                fprintf(err, "2nd Place: %d\n", racer + 2);
-                next_trial(state_machine.frame_data[state_machine.current_frame_index].tiles[racer] == 2, racer + 2);
-                break;
-              }
+              fprintf(err, "2nd Place: %d\n", racer + 2);
+              next_trial(racer + 2);
+              break;
             }
           }
         }
