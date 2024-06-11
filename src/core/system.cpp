@@ -1636,20 +1636,34 @@ std::string script_in_filename;
 std::string script_out_filename;
 std::string script_err_filename;
 std::string script_savestate_filename;
+void open_err()
+{
+  err = fopen(script_err_filename.c_str(), "a");
+}
 
+void close_err()
+{
+  fclose(err);
+}
 int read_next_frame()
 {
+  printf("starting next frame\n");
   int ret;
   int chars_read_this_line = 0;
   in = fopen(script_in_filename.c_str(), "r");
   ret = fseek(in, state_machine.chars_read_total, SEEK_SET);
+  printf("fseek ret: %d", ret);
   ret = fscanf(in, "%d\r\n%n", &state_machine.frame, &chars_read_this_line);
   if (ret == EOF)
   {
+    open_err();
     fprintf(err, "end of file\n");
+    close_err();
     return 0;
   }
   state_machine.chars_read_total += chars_read_this_line;
+  printf("chars read this line: %d. chars read total: %d\n", chars_read_this_line, state_machine.chars_read_total);
+  fclose(in);
   return 1;
 }
 
@@ -1673,11 +1687,9 @@ void init_script()
   fprintf(out, "{\n");
   fclose(in);
   fclose(out);
-
-  read_next_frame();
-
   fclose(err);
 
+  read_next_frame();
 
   state_machine.state = STATE_WAITING_FOR_RACE_MODE;
   state_machine.current_frame_index = 0;
@@ -1686,7 +1698,9 @@ void init_script()
 
   if (!g_host_interface->LoadState(script_savestate_filename.c_str()))
   {
+    open_err();
     fprintf(err, "Failed to load starting savestate\n");
+    close_err();
     exit(1);
   }
 
@@ -1696,6 +1710,10 @@ void init_script()
 void next_trial(int second_player)
 {
   out = fopen(script_out_filename.c_str(), "a");
+  if (!out)
+  {
+    exit(1);
+  }
   if (state_machine.current_inputs_index == 0)
   {
     fprintf(out, "%d:{", state_machine.frame);
@@ -1713,12 +1731,16 @@ void next_trial(int second_player)
     {
       state_machine.current_inputs_index = 0;
       state_machine.state = STATE_SET_RNG;
+      printf("loading state...");
       LoadMemoryState(choco_savestate);
+      printf("state loaded\n");
     }
     else
     {
       state_machine.state = STATE_DONE;
+      open_err();
       fprintf(err, "done!\n");
+      close_err();
       out = fopen(script_out_filename.c_str(), "a");
       fprintf(out, "}\n");
       fclose(out);
@@ -1735,13 +1757,13 @@ void next_trial(int second_player)
 
 void run_script()
 {
+  //printf("start of run script %d\n", state_machine.state);
   // clear controller 1's buttons
   set_controller_inputs(0);
   if (!sm_is_init)
   {
     init_script();
   }
-  err = fopen(script_err_filename.c_str(), "a");
   switch (state_machine.state)
   {
     case STATE_WAITING_FOR_RACE_MODE:
@@ -1751,7 +1773,9 @@ void run_script()
       {
         state_machine.timer = 100;
         state_machine.state = STATE_WAITING_FOR_A_BIT_AFTER_RACE_MODE_ENTER;
+        open_err();
         fprintf(err, "chocobo race mode start\n");
+        close_err();
       }
       break;
     case STATE_WAITING_FOR_A_BIT_AFTER_RACE_MODE_ENTER:
@@ -1759,7 +1783,9 @@ void run_script()
       {
         SaveMemoryState(&choco_savestate);
         state_machine.state = STATE_SET_RNG;
+        open_err();
         fprintf(err, "savestate initialized\n");
+        close_err();
       }
       else
       {
@@ -1768,8 +1794,10 @@ void run_script()
       break;
     case STATE_SET_RNG:
       CPU::SafeWriteMemoryWord(0x80009010, state_machine.frame);
+      open_err();
       fprintf(err, "RNG: %d %x. Inputs: %x.\n", state_machine.frame, state_machine.frame,
               BUTTON_COMBOS[state_machine.current_inputs_index]);
+      close_err();
       state_machine.state = STATE_HOLDING_START_FOR_PRE_RACE_SCREEN;
       state_machine.timer = 20;
       break;
@@ -1807,7 +1835,9 @@ void run_script()
         if (byte != 1)
         {
           // we did not win
+          open_err();
           fprintf(err, "We did not win.\n");
+          close_err();
           next_trial(-1);
         }
         else
@@ -1820,7 +1850,9 @@ void run_script()
             CPU::SafeReadMemoryByte(addr, &byte);
             if (byte == 2)
             {
+              open_err();
               fprintf(err, "2nd Place: %d\n", racer + 2);
+              close_err();
               next_trial(racer + 2);
               break;
             }
@@ -1829,7 +1861,6 @@ void run_script()
       }
       break;
   }
-  fclose(err);
 }
 
 void RunFrame()
@@ -1846,16 +1877,6 @@ void RunFrame()
     DoRunahead();
 
   run_script();
-  /*if (GetController(1)->GetButtonState(0))
-  {
-    CPU::SafeWriteMemoryWord(0x80009010, 216049);
-  }*/
-
-  /*err = fopen(script_err_filename, "a");
-  u32 rng;
-  CPU::SafeReadMemoryWord(0x80009010, &rng);
-  fprintf(err, "%x\n", rng);
-  fclose(err);*/
 
   DoRunFrame();
 
@@ -1864,6 +1885,8 @@ void RunFrame()
   if (s_memory_saves_enabled)
     DoMemorySaveStates();
 }
+
+// END CHOCODUCK
 
 float GetTargetSpeed()
 {
